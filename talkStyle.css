@@ -223,7 +223,7 @@ a {
   border: none;
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
-  transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease), background-color 0.15s var(--ease);
+  transition: transform 0.3s var(--ease), box-shadow 0.3s var(--ease), background-color 0.3s var(--ease);
 }
 .drawer button.normal-button:hover:not(:disabled) {
   background-color: var(--primary-dark);
@@ -824,7 +824,7 @@ a {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background-color 0.15s var(--ease), transform 0.15s var(--ease), box-shadow 0.15s var(--ease);
+  transition: background-color 0.3s var(--ease), transform 0.3s var(--ease), box-shadow 0.3s var(--ease);
 }
 #message-add-button::before {
   content: "";
@@ -856,7 +856,7 @@ a {
 
 /* --- レインボー・アニメーション共通 --- */
 .member-item.admin .member-name,
-#read-area p.admin,
+#read-area p .admin,
 #drawerUsername.admin,
 .message .message-user .admin {
   background: linear-gradient(
