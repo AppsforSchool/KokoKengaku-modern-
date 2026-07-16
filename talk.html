@@ -1,0 +1,154 @@
+<html lang="ja">
+  
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#007AB7">
+
+  <title>高校見学</title>
+  <meta name="apple-mobile-web-app-capable" content="yes"> 
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=BIZ+UDGothic:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Signika+Negative:wght@300..700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="talkStyle.css">
+
+  <link rel="icon" type="image/png" sizes="32x32" href="icon-512.png">
+  <link rel="apple-touch-icon" href="icon-512.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-512.png">
+  
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+</head>
+  
+<body>
+  <div id="loading-overlay" class="hidde">
+    <h1>loading...</h1>
+    <p>システムの読み込みに時間がかかる場合があります｡</p>
+  </div>
+  <div id="no-active-overlay" class="hidden">
+    <p>アカウントが停止されています</p>
+  </div>
+  
+  <div id="member-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <p class="title">メンバー</p>
+        <span id="member-modal-close" class="close-button">&times;</span>
+      </div>
+      
+      <div id="member-area">
+        
+      </div>
+    </div>
+  </div>
+
+  <div id="read-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <p class="title">既読</p>
+        <span id="read-modal-close" class="close-button">&times;</span>
+      </div>
+      
+      <div id="read-area">
+        
+      </div>
+    </div>
+  </div>
+
+  <div id="edit-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <p class="title">編集</p>
+        <span id="edit-modal-close" class="close-button">&times;</span>
+      </div>
+      <input id="new-userId-input" placeholder="user id"></input>
+      <textarea id="new-message-input" rows="5"></textarea>
+      <button id="new-message-change-button">保存</button>
+      <span class="split-line"></span>
+      <button id="message-delete-button">削除</button>
+    </div>
+  </div>
+  
+  <div id="share-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <p class="title">シェア</p>
+        <span id="share-modal-close" class="close-button">&times;</span>
+      </div>
+      <img src="qrcode.png" alt="QR Code">
+    </div>
+  </div>
+  
+  <div id="drawerOverlay" class="drawer-overlay"></div>
+  <div id="accountSettingsDrawer" class="drawer">
+    <div class="drawer-header">
+      <p>アカウント設定</p>
+      <span id="drawerCloseButton" class="drawer-close-button">&times;</span>
+    </div>
+    <div class="drawer-content">
+      <div class="drawer-section">
+        <p class="title">現在のユーザー</p>
+        <p>ID: <strong id="drawerUserId">取得中...</strong><span></span></p>
+        
+        <button id="logout-button" class="logout-button normal-button">ログアウト</button>
+      </div>
+      <div class="drawer-section">
+        <p class="title">ユーザーネーム</p>
+        <p>現在の名前: <strong id="drawerUsername">取得中...</strong></p>
+        <input type="text" id="newUsernameInput" placeholder="新しい名前">
+        <button id="changeUsernameButton" class="normal-button" disabled="true">名前を変更</button>
+        <p id="username-message"></p>
+      </div>
+    </div>
+</div>
+  
+  
+  <header id="app-header">
+    <div id="title-area">
+      <p id="header-title">螺鈿紫檀五弦琵琶と<span class="rainbow">不愉快な仲間たち</span></p>
+      <button id="share-modal-btn">シェア</button>
+    </div>
+    
+    <div id="user-data">
+     <!--<p id="header-username">取得中...</p>-->
+      <button id="setting-button">アカウント情報</button>
+    </div>
+  </header>
+  
+  
+  <main>
+    <div id="selection-container">
+      <p id="selection-title">My Talk</p>
+      <div id="head-area">
+        <button id="to-home-button">←ホームへもどる</button>
+        <p id="talk-title">loading...</p>
+        <p id="member-button">メンバー</p>
+      </div>
+      <p id="talk-loading" class="hidden">loading...</p>
+      <div id="talk-area" class="hidde selection">
+        <p>loading...</p>
+        <!--
+<div class="message">
+          <p class="message-user"><span>a</span> <span>2026/07/20 19:54</span>  <span class="message-read">既読:<span>3</span>人</span></p>
+          <p class="message-text">BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA</p>
+          
+        </div>
+<!---->
+      </div>
+
+      <div id="message-add-area">
+        <textarea id="message-input" placeholder="メッセージを入力"></textarea>
+        <button id="message-add-button" disabled aria-label="送信">送信</button>
+      </div>
+      
+    </div>
+  </main>
+  
+  
+  
+  <script type="module" src="talkScript.js"></script>
+</html>
