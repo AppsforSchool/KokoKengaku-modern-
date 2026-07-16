@@ -1,3 +1,4 @@
+<!DOCTYPE html>
 <html lang="ja">
   
 <head>
@@ -25,7 +26,7 @@
 </head>
   
 <body>
-  <div id="loading-overlay" class="hidde">
+  <div id="loading-overlay">
     <h1>loading...</h1>
     <p>システムの読み込みに時間がかかる場合があります｡</p>
   </div>
@@ -72,6 +73,31 @@
       <button id="message-delete-button">削除</button>
     </div>
   </div>
+
+  <!-- プロフィールモーダル -->
+  <div id="profile-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <p class="title">プロフィール</p>
+        <span id="profile-modal-close" class="close-button">&times;</span>
+      </div>
+      <div id="profile-area">
+        <div class="profile-avatar-wrap">
+          <div id="profile-avatar-holder"></div>
+        </div>
+
+        <!-- 名前表示/入力エリア -->
+        <p id="profile-name">取得中...</p>
+        <input id="profile-name-input" class="hidden" type="text" placeholder="ユーザーネーム">
+
+        <p class="profile-label">ステータスメッセージ</p>
+        <div id="profile-text">取得中...</div>
+        <textarea id="profile-text-edit" class="hidden" placeholder="自己紹介を入力してください"></textarea>
+
+        <button id="profile-edit-button" class="hidden">プロフィールを編集</button>
+      </div>
+    </div>
+  </div>
   
   <div id="share-modal" class="modal-overlay hidden">
     <div class="modal-content">
@@ -93,18 +119,13 @@
       <div class="drawer-section">
         <p class="title">現在のユーザー</p>
         <p>ID: <strong id="drawerUserId">取得中...</strong><span></span></p>
-        
+        <p>ユーザーネーム: <strong id="drawerUsername">取得中...</strong></p>
+
+        <button id="drawer-edit-profile-button" class="normal-button" style="margin-bottom: 1rem;">プロフィールを編集</button>
         <button id="logout-button" class="logout-button normal-button">ログアウト</button>
       </div>
-      <div class="drawer-section">
-        <p class="title">ユーザーネーム</p>
-        <p>現在の名前: <strong id="drawerUsername">取得中...</strong></p>
-        <input type="text" id="newUsernameInput" placeholder="新しい名前">
-        <button id="changeUsernameButton" class="normal-button" disabled="true">名前を変更</button>
-        <p id="username-message"></p>
-      </div>
     </div>
-</div>
+  </div>
   
   
   <header id="app-header">
@@ -114,7 +135,6 @@
     </div>
     
     <div id="user-data">
-     <!--<p id="header-username">取得中...</p>-->
       <button id="setting-button">アカウント情報</button>
     </div>
   </header>
@@ -129,26 +149,18 @@
         <p id="member-button">メンバー</p>
       </div>
       <p id="talk-loading" class="hidden">loading...</p>
-      <div id="talk-area" class="hidde selection">
+      <div id="talk-area" class="selection">
         <p>loading...</p>
-        <!--
-<div class="message">
-          <p class="message-user"><span>a</span> <span>2026/07/20 19:54</span>  <span class="message-read">既読:<span>3</span>人</span></p>
-          <p class="message-text">BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA BAAAAAAAAA</p>
-          
-        </div>
-<!---->
       </div>
 
       <div id="message-add-area">
-        <textarea id="message-input" placeholder="メッセージを入力"></textarea>
-        <button id="message-add-button" disabled aria-label="送信">送信</button>
+        <textarea id="message-input" rows="5" placeholder="メッセージを入力"></textarea>
+        <button id="message-add-button" disabled>送信</button>
       </div>
       
     </div>
   </main>
   
-  
-  
   <script type="module" src="talkScript.js"></script>
+</body>
 </html>

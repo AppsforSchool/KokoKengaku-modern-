@@ -79,7 +79,6 @@ a {
   gap: 0.5rem;
   padding: 1rem;
 }
-
 #loading-overlay h1 {
   font-size: 2.6rem;
   color: white;
@@ -91,8 +90,6 @@ a {
   font-size: 0.9rem;
   color: rgba(255, 255, 255, 0.75);
 }
-
-
 #loading-overlay.hidden,
 #no-active-overlay.hidden {
   display: none;
@@ -223,7 +220,7 @@ a {
   border: none;
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-sm);
-  transition: transform 0.3s var(--ease), box-shadow 0.3s var(--ease), background-color 0.3s var(--ease);
+  transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease), background-color 0.2s var(--ease);
 }
 .drawer button.normal-button:hover:not(:disabled) {
   background-color: var(--primary-dark);
@@ -436,6 +433,148 @@ a {
   outline: none;
 }
 
+/* --- プロフィールモーダル --- */
+#profile-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  gap: 0.9rem;
+}
+.profile-avatar-wrap {
+  display: flex;
+  justify-content: center;
+}
+#profile-name {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text);
+  word-break: break-all;
+  text-align: center;
+}
+#profile-name.admin,
+.member-item.admin .member-name,
+#read-area p .admin,
+#drawerUsername.admin,
+.message .message-user .admin {
+  background: linear-gradient(
+    90deg,
+    #ff5a5a, #ffbc41, #f5f551, #5eff5e, #84a1ff, #ff45ff, #ff5a5a
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: wave 2s linear infinite;
+}
+@keyframes wave {
+  0% { background-position: 0% center; }
+  100% { background-position: 200% center; }
+}
+
+#profile-name-input {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-alt);
+  text-align: center;
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease), background-color 0.2s var(--ease);
+}
+#profile-name-input:hover {
+  border-color: #c7ccd2;
+}
+#profile-name-input:focus {
+  border-color: var(--primary);
+  background-color: var(--surface);
+  box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.15);
+  outline: none;
+}
+
+.profile-label {
+  align-self: flex-start;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--primary);
+  margin-bottom: -0.3rem;
+}
+
+#profile-text,
+#profile-text-edit {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  width: 100%;
+  min-height: 110px;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-md);
+  word-break: break-word;
+  box-sizing: border-box;
+  line-height: 1.55;
+  text-align: left;
+}
+#profile-text {
+  background-color: var(--surface-alt);
+  border: 1.5px solid var(--border);
+  white-space: pre-wrap;
+  color: var(--text);
+}
+#profile-text-edit {
+  background-color: var(--surface);
+  border: 1.5px solid var(--border);
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+#profile-text-edit:hover {
+  border-color: #c7ccd2;
+}
+#profile-text-edit:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.15);
+  outline: none;
+}
+#profile-text-edit.hidden {
+  display: none;
+}
+
+#profile-edit-button {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-weight: 700;
+  font-size: 0.95rem;
+  padding: 0.7rem;
+  width: 100%;
+  text-align: center;
+  cursor: pointer;
+  display: block;
+  box-sizing: border-box;
+  background-color: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease), background-color 0.15s var(--ease);
+}
+#profile-edit-button:hover:not(:disabled) {
+  background-color: var(--primary-dark);
+  box-shadow: var(--shadow-md);
+}
+#profile-edit-button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+#profile-edit-button:disabled {
+  background-color: #dbe0e6;
+  color: #9aa4ae;
+  box-shadow: none;
+}
+#profile-edit-button.hidden {
+  display: none;
+}
+
 
 /* --- ヘッダー領域 --- */
 #app-header {
@@ -588,9 +727,31 @@ a {
   border-radius: var(--radius-sm);
   width: 100%;
   transition: background-color 0.15s var(--ease);
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 #read-area p:hover {
   background-color: var(--surface-alt);
+}
+
+/* --- クリック可能なユーザー要素（名前・アバター共通） --- */
+.clickable-user {
+  transition: opacity 0.15s var(--ease);
+  /* text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;*/
+}
+.clickable-user:hover {
+  opacity: 0.7;
+}
+.avatar-circle.clickable-user {
+  text-decoration: none;
+  transition: transform 0.15s var(--ease);
+}
+.avatar-circle.clickable-user:hover {
+  opacity: 1;
+  transform: scale(1.06);
 }
 
 /* --- アバター（頭文字アイコン） --- */
@@ -614,6 +775,12 @@ a {
   height: 1.8rem;
   min-width: 1.8rem;
   font-size: 0.8rem;
+}
+.avatar-circle.large {
+  width: 4.4rem;
+  height: 4.4rem;
+  min-width: 4.4rem;
+  font-size: 1.7rem;
 }
 
 /* --- トーク上部操作エリア --- */
@@ -729,13 +896,14 @@ a {
   margin-bottom: 4px;
   flex-wrap: wrap;
 }
-.message .message-user .read-count {
-  cursor: pointer;
-  text-decoration: underline;
+.message .message-user span {
+  text-decoration: none;
 }
-.message .message-user .edit-link {
+.message .message-user .clickable-user {
+  /*text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;*/
   cursor: pointer;
-  text-decoration: underline;
 }
 
 .message .message-text {
@@ -773,6 +941,14 @@ a {
 .message .message-text .large {
   font-size: 1.25rem;
 }
+.message .message-text .small {
+  font-size: 0.85rem;
+}
+.message .message-text .emoji {
+  font-size: 1.3rem;
+  line-height: 1.2;
+  vertical-align: -0.2em;
+}
 .message .message-text .main-color {
   color: var(--primary);
 }
@@ -796,7 +972,7 @@ a {
   flex-grow: 1;
   padding: 0.7rem 1.1rem;
   border: 1.5px solid var(--border);
-  border-radius: var(--radius-full);
+  border-radius: var(--radius-lg);
   background-color: var(--surface-alt);
   resize: none;
   transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease), background-color 0.2s var(--ease);
@@ -824,7 +1000,7 @@ a {
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: background-color 0.3s var(--ease), transform 0.3s var(--ease), box-shadow 0.3s var(--ease);
+  transition: background-color 0.2s var(--ease), transform 0.2s var(--ease), box-shadow 0.2s var(--ease);
 }
 #message-add-button::before {
   content: "";
@@ -852,28 +1028,6 @@ a {
   color: #9aa4ae;
   box-shadow: none;
   cursor: default;
-}
-
-/* --- レインボー・アニメーション共通 --- */
-.member-item.admin .member-name,
-#read-area p .admin,
-#drawerUsername.admin,
-.message .message-user .admin {
-  background: linear-gradient(
-    90deg,
-    #ff5a5a, #ffbc41, #f5f551, #5eff5e, #84a1ff, #ff45ff, #ff5a5a
-  );
-  background-size: 200% auto;
-  -webkit-background-clip: text;
-  background-clip: text;
-  -webkit-text-fill-color: transparent;
-  color: transparent;
-  animation: wave 2s linear infinite;
-}
-
-@keyframes wave {
-  0% { background-position: 0% center; }
-  100% { background-position: 200% center; }
 }
 
 /* --- フッター --- */
