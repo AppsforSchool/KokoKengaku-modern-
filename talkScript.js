@@ -985,7 +985,7 @@ document.addEventListener("DOMContentLoaded", () => {
     imagePreviewContainer.classList.add("hidden");
     submitImageBtn.disabled = true;
     submitImageBtn.textContent = "画像を送信";
-    imageModalClose.disabled = false;
+    imageModalClose.classList.remove("hidden");
     selectImageBtn.disabled = false;
     imageMessageInput.disabled = false;
     imageUploadModal.classList.remove("hidden");
@@ -1024,7 +1024,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
     // UIを「アップロード中」に変更して入力をロック
     submitImageBtn.disabled = true;
-    imageModalClose.disabled = true; // 閉じるボタンを無効化
+    imageModalClose.classList.add("hidden"); // 閉じるボタンを無効化
     selectImageBtn.disabled = true;
     submitImageBtn.textContent = "画像をアップロード中...";
     imageMessageInput.disabled = true;
@@ -1080,7 +1080,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // エラー時はユーザーがやり直せるようにボタンのロックを解除
       submitImageBtn.disabled = false;
       submitImageBtn.textContent = "画像を送信";
-      imageModalClose.disabled = false;
+      imageModalClose.classList.remove("hidden");
       selectImageBtn.disabled = false;
       imageMessageInput.disabled = false;
     }
