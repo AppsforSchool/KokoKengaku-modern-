@@ -762,6 +762,26 @@ div, p {
   color: #adb5bd;
 }
 
+/* --- プロフィールモーダル --- */
+#profile-area {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 100%;
+  gap: 0.9rem;
+}
+.profile-avatar-wrap {
+  display: flex;
+  justify-content: center;
+}
+#profile-name {
+  font-size: 1.2rem;
+  font-weight: 700;
+  color: var(--text);
+  word-break: break-all;
+  text-align: center;
+}
+#profile-name.admin,
 #drawerUsername.admin {
   background: linear-gradient(
     90deg,
@@ -774,6 +794,138 @@ div, p {
   color: transparent;
   animation: wave 2s linear infinite;
 }
+
+#profile-name-input {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-size: 1.05rem;
+  font-weight: 700;
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-alt);
+  text-align: center;
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease), background-color 0.2s var(--ease);
+}
+#profile-name-input:hover {
+  border-color: #c7ccd2;
+}
+#profile-name-input:focus {
+  border-color: var(--primary);
+  background-color: var(--surface);
+  box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.15);
+  outline: none;
+}
+
+.profile-label {
+  align-self: flex-start;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--primary);
+  margin-bottom: -0.3rem;
+}
+
+#profile-text,
+#profile-text-edit {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-size: 0.95rem;
+  font-weight: 500;
+  width: 100%;
+  min-height: 110px;
+  padding: 0.85rem 1rem;
+  border-radius: var(--radius-md);
+  word-break: break-word;
+  box-sizing: border-box;
+  line-height: 1.55;
+  text-align: left;
+}
+#profile-text {
+  background-color: var(--surface-alt);
+  border: 1.5px solid var(--border);
+  white-space: pre-wrap;
+  color: var(--text);
+}
+#profile-text-edit {
+  background-color: var(--surface);
+  border: 1.5px solid var(--border);
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+}
+#profile-text-edit:hover {
+  border-color: #c7ccd2;
+}
+#profile-text-edit:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.15);
+  outline: none;
+}
+#profile-text-edit.hidden {
+  display: none;
+}
+
+#profile-edit-button {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-weight: 700;
+  font-size: 0.95rem;
+  padding: 0.7rem;
+  width: 100%;
+  text-align: center;
+  cursor: pointer;
+  display: block;
+  box-sizing: border-box;
+  background-color: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.15s var(--ease), box-shadow 0.15s var(--ease), background-color 0.15s var(--ease);
+}
+#profile-edit-button:hover:not(:disabled) {
+  background-color: var(--primary-dark);
+  box-shadow: var(--shadow-md);
+}
+#profile-edit-button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+#profile-edit-button:disabled {
+  background-color: #dbe0e6;
+  color: #9aa4ae;
+  box-shadow: none;
+}
+#profile-edit-button.hidden {
+  display: none;
+}
+
+/* --- アバター（頭文字アイコン） --- */
+.avatar-circle {
+  width: 2.2rem;
+  height: 2.2rem;
+  min-width: 2.2rem;
+  border-radius: var(--radius-full);
+  background: linear-gradient(155deg, var(--primary), var(--primary-dark));
+  color: #fff;
+  font-weight: 700;
+  font-size: 0.95rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  user-select: none;
+}
+.avatar-circle.small {
+  width: 1.8rem;
+  height: 1.8rem;
+  min-width: 1.8rem;
+  font-size: 0.8rem;
+}
+.avatar-circle.large {
+  width: 4.4rem;
+  height: 4.4rem;
+  min-width: 4.4rem;
+  font-size: 1.7rem;
+}
+
 
 #details-area {
   background-color: var(--surface-alt);
