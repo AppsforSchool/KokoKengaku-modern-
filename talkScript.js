@@ -112,7 +112,7 @@ document.addEventListener("DOMContentLoaded", () => {
           userAdminCache[myUserId] = userData.isAdmin;
 
           talkId = getParmFromUrl("id");
-          talkId = "0update";
+          // talkId = "0update";
           // ★ メンバーのリアルタイム監視・キャッシュ化を開始
           await setupMemberSnapshots(talkId);
 
