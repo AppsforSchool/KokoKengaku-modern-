@@ -25,9 +25,24 @@ let accountSettingsButton;
 let drawerUserId;
 let drawerLogoutButton;
 let drawerUsername;
-let changeUsernameButton;
-let newUsernameInput;
-let usernameMessage;
+let drawerEditProfileButton; // ドロワーの「プロフィールを編集」ボタン
+
+// ★ アバターの頭文字を安全に取り出すヘルパー
+function getInitial(name) {
+  if (!name) return "?";
+  return Array.from(name.trim())[0] || "?";
+}
+
+// ★ 頭文字アバターを生成するヘルパー（size: "small" | "large" | 省略で通常サイズ）
+function createAvatar(name, size) {
+  const avatar = document.createElement("div");
+  avatar.classList.add("avatar-circle");
+  if (size === "small") avatar.classList.add("small");
+  if (size === "large") avatar.classList.add("large");
+  avatar.textContent = getInitial(name);
+  return avatar;
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   loadingOverlay = document.getElementById("loading-overlay");
   noActiveOverlay = document.getElementById("no-active-overlay");
@@ -40,17 +55,18 @@ document.addEventListener("DOMContentLoaded", () => {
   drawerUserId = document.getElementById("drawerUserId");
   drawerLogoutButton = document.getElementById("logout-button");
   drawerUsername = document.getElementById("drawerUsername");
-  changeUsernameButton = document.getElementById("changeUsernameButton");
-  newUsernameInput = document.getElementById("newUsernameInput");
-  usernameMessage = document.getElementById("username-message");
+  drawerEditProfileButton = document.getElementById("drawer-edit-profile-button");
   
   accountSettingsButton.addEventListener('click', openDrawer);
   drawerCloseButton.addEventListener('click', closeDrawer);
   drawerOverlay.addEventListener('click', closeDrawer);
   drawerLogoutButton.addEventListener('click', handleLogout);
-  
-  changeUsernameButton.addEventListener('click', handleChangeUsername);
-newUsernameInput.addEventListener('input', updateNameButtonState);
+
+  // ドロワー内の「プロフィールを編集」ボタン
+  drawerEditProfileButton.addEventListener('click', () => {
+    closeDrawer();
+    openProfileModal(myUserId, true); // 自分のプロフィールを編集モードONで開く
+  });
 });
 
 
@@ -116,51 +132,170 @@ const handleLogout = async () => {
   }
 };
 
-function updateNameButtonState() {
-  if (changeUsernameButton) { // changeUsernameButtonが存在する場合のみ実行
-    // 値があるかチェック
-    usernameMessage.textContent = '';
-    const hasNewName = newUsernameInput && newUsernameInput.value.trim() !== '';
-    // 入力されていればボタンを有効、そうでなければ無効
-    changeUsernameButton.disabled = !hasNewName;
+let profileModal;
+let profileModalClose;
+let profileAvatarHolder;
+let profileName;
+let profileNameInput;
+let profileText;
+let profileTextEdit;
+let profileEditButton;
+let isProfileEditing = false;
+let currentProfileUserId = "";
+
+document.addEventListener("DOMContentLoaded", () => {
+  profileModal = document.getElementById("profile-modal");
+  profileModalClose = document.getElementById("profile-modal-close");
+  profileAvatarHolder = document.getElementById("profile-avatar-holder");
+  profileName = document.getElementById("profile-name");
+  profileNameInput = document.getElementById("profile-name-input");
+  profileText = document.getElementById("profile-text");
+  profileTextEdit = document.getElementById("profile-text-edit");
+  profileEditButton = document.getElementById("profile-edit-button");
+
+  profileModalClose.addEventListener("click", () => {
+    profileModal.classList.add("hidden");
+    resetProfileEditMode();
+  });
+
+  profileEditButton.addEventListener("click", handleProfileEditOrSave);
+});
+
+// 編集モードをリセットする関数
+function resetProfileEditMode() {
+  isProfileEditing = false;
+  if (profileEditButton) {
+    profileEditButton.textContent = "プロフィールを編集";
+    profileEditButton.disabled = false;
+  }
+  if (profileName) profileName.classList.remove("hidden");
+  if (profileNameInput) profileNameInput.classList.add("hidden");
+  if (profileText) profileText.classList.remove("hidden");
+  if (profileTextEdit) profileTextEdit.classList.add("hidden");
+}
+
+// 編集ボタン・保存ボタンが押された時の処理
+async function handleProfileEditOrSave() {
+  if (!isProfileEditing) {
+    isProfileEditing = true;
+    profileEditButton.textContent = "プロフィールを保存";
+
+    let currentName = profileName.textContent;
+    let currentText = profileText.textContent;
+
+    if (currentText === "ステータスメッセージはありません。" || currentText === "取得中...") {
+      currentText = "";
+    }
+    if (currentName === "取得中..." || currentName === "不明なユーザー") {
+      currentName = "";
+    }
+
+    profileName.classList.add("hidden");
+    profileNameInput.classList.remove("hidden");
+    profileNameInput.value = currentName;
+
+    profileText.classList.add("hidden");
+    profileTextEdit.classList.remove("hidden");
+    profileTextEdit.value = currentText;
+
+  } else {
+    const newName = profileNameInput.value.trim();
+    const newProfileText = profileTextEdit.value.trim();
+
+    if (!newName) {
+      alert("ユーザーネームを入力してください。");
+      return;
+    }
+
+    profileEditButton.disabled = true;
+    profileEditButton.textContent = "保存中...";
+
+    try {
+      await db.collection("users_random").doc(currentProfileUserId).set(
+        {
+          name: newName,
+          profileText: newProfileText
+        },
+        { merge: true }
+      );
+
+      drawerUsername.textContent = newName;
+
+      profileName.textContent = newName;
+      profileText.textContent = newProfileText || "ステータスメッセージはありません。";
+
+      profileAvatarHolder.innerHTML = "";
+      profileAvatarHolder.appendChild(createAvatar(newName, "large"));
+
+      const userSnapshot = await db.collection("users_random").doc(currentProfileUserId).get();
+      if (userSnapshot.exists && userSnapshot.data().isAdmin) {
+        profileName.classList.add("admin");
+      } else {
+        profileName.classList.remove("admin");
+      }
+
+      resetProfileEditMode();
+      alert("プロフィールを保存しました。");
+    } catch (error) {
+      console.error("プロフィール保存エラー:", error);
+      alert("プロフィールの保存に失敗しました: " + error.message);
+      profileEditButton.disabled = false;
+      profileEditButton.textContent = "プロフィールを保存";
+    }
   }
 }
-// --- 名前変更処理 ---
-const handleChangeUsername = async () => {
-  // ドロワー内の入力要素とメッセージ要素を取得
-  const newUsername = newUsernameInput.value.trim();
-  usernameMessage.textContent = ''; // メッセージをクリア
 
-  if (changeUsernameButton) {
-    changeUsernameButton.disabled = true;
-    changeUsernameButton.textContent = '変更中...';
-    usernameMessage.textContent = '';
-  }
+// プロフィールモーダルを開いてFirebaseから最新のステメ等を取得する関数
+// startEditModeがtrueの場合、ダイレクトに編集可能なテキストエリア等を開く
+async function openProfileModal(userId, startEditMode = false) {
+  currentProfileUserId = userId;
+  resetProfileEditMode();
+
+  profileName.textContent = "取得中...";
+  profileText.textContent = "取得中...";
+  profileName.classList.remove("admin");
+
+  profileAvatarHolder.innerHTML = "";
+  profileAvatarHolder.appendChild(createAvatar(drawerUsername ? drawerUsername.textContent : "", "large"));
+
+  profileEditButton.classList.add("hidden");
+  profileModal.classList.remove("hidden");
+
   try {
-    const user = auth.currentUser;
-    if (!user) throw new Error("ユーザーがログインしていません。");
-    // Firestoreの users/{UID} ドキュメントを更新
-    await db.collection('users_random').doc(myUserId).set({
-    name: newUsername, // フィールド名も前のコードに合わせて 'name' にしています
-  }, { merge: true });
+    const userSnapshot = await db.collection("users_random").doc(userId).get();
+    if (userSnapshot.exists) {
+      const userData = userSnapshot.data();
+      profileName.textContent = userData.name || "名前未設定";
 
-    usernameMessage.style.color = 'green';
-    usernameMessage.textContent = 'ユーザーネームが変更されました！';
-    drawerUsername.textContent = newUsername; // 表示を更新
-    newUsernameInput.value = ''; // 入力フィールドをクリア
-    changeUsernameButton.disabled = true;
-
-    } catch (error) {
-      console.error("ユーザーネーム変更エラー:", error);
-      usernameMessage.style.color = 'red';
-      usernameMessage.textContent = 'ユーザーネームの変更に失敗しました。' + error.message;
-      changeUsernameButton.disabled = false;
-    } finally {
-      if (changeUsernameButton) {
-        changeUsernameButton.textContent = '名前を変更';
+      if (userData.isAdmin) {
+        profileName.classList.add("admin");
       }
+
+      profileAvatarHolder.innerHTML = "";
+      profileAvatarHolder.appendChild(createAvatar(userData.name || "名前未設定", "large"));
+
+      profileText.textContent = userData.profileText || "ステータスメッセージはありません。";
+
+      // ★ 自分のプロフィールだった場合のみ、編集ボタンを表示する
+      if (meIsAdmin || userId === myUserId) {
+        profileEditButton.classList.remove("hidden");
+
+        if (startEditMode) {
+          handleProfileEditOrSave();
+        }
+      }
+    } else {
+      profileName.textContent = "不明なユーザー";
+      profileText.textContent = "";
     }
-};
+  } catch (error) {
+    console.error("プロフィール取得エラー:", error);
+    profileName.textContent = "エラー";
+    profileText.textContent = "プロフィールの取得に失敗しました。";
+  }
+}
+
+
 
 
 // リアルタイム更新の監視を解除するための関数を保持する変数
