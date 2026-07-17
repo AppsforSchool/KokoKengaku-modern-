@@ -112,7 +112,6 @@ document.addEventListener("DOMContentLoaded", () => {
           userAdminCache[myUserId] = userData.isAdmin;
 
           talkId = getParmFromUrl("id");
-          // talkId = "0update";
           // ★ メンバーのリアルタイム監視・キャッシュ化を開始
           await setupMemberSnapshots(talkId);
 
@@ -281,6 +280,7 @@ async function getAllTalkData(talkId) {
           const readSpan = document.createElement("span");
           readSpan.textContent = `既読:${displayReadCount}人`;
           readSpan.style.textDecoration = 'underline';
+          readSpan.style.cursor = 'pointer';
           readSpan.addEventListener("click", () => {
             openReadByModal(readByList);
           });
@@ -288,9 +288,6 @@ async function getAllTalkData(talkId) {
           const senderNameSpan = document.createElement("span");
           senderNameSpan.textContent = `${senderName} `;
           senderNameSpan.classList.add("clickable-user");
-          senderNameSpan.style.cursor = 'pointer'; // カーソルをポインターに
-          
-          // タップ（クリック）されたらプロフィールモーダルを開く
           senderNameSpan.addEventListener("click", () => {
             openProfileModal(messageUserId);
           });
@@ -304,6 +301,7 @@ async function getAllTalkData(talkId) {
           const editSpan = document.createElement("span");
           editSpan.textContent = `編集`;
           editSpan.style.textDecoration = 'underline';
+          editSpan.style.cursor = 'pointer';
           editSpan.addEventListener("click", () => {
             openEditModal(talkDoc.id, messageData.userId, messageData.message);
           });
@@ -321,6 +319,15 @@ async function getAllTalkData(talkId) {
 
           const messageText = document.createElement("p");
           messageText.classList.add("message-text");
+
+          // ★ 画像があれば画像を先に、続けてテキスト（キャプション）があれば表示
+          if (messageData.imageUrl) {
+            const img = document.createElement("img");
+            img.src = messageData.imageUrl;
+            img.alt = "送信された画像";
+            img.classList.add("message-image");
+            messageText.appendChild(img);
+          }
           const safeContent = sanitizeHtmlToOnlyLinks(messageData.message);
           messageText.appendChild(safeContent);
 
@@ -763,7 +770,7 @@ async function messageDelete(messageId) {
 
 let profileModal;
 let profileModalClose;
-let profileAvatarHolder; // 追加：アバター表示エリア
+let profileAvatarHolder;
 let profileName;
 let profileNameInput; // 追加：編集用の名前入力欄
 let profileText;
@@ -826,7 +833,6 @@ async function handleProfileEditOrSave() {
       currentName = "";
     }
 
-    // --- 中のHTMLを書き換えるのではなく、事前に配置された要素をスイッチする ---
     profileName.classList.add("hidden");
     profileNameInput.classList.remove("hidden");
     profileNameInput.value = currentName;
@@ -946,3 +952,137 @@ async function openProfileModal(userId, startEditMode = false) {
     profileText.textContent = "プロフィールの取得に失敗しました。";
   }
 }
+
+// ★ 画像送信モーダル一式（キャプション付き）
+let imageUploadModal;
+let openImageModalBtn;
+let imageModalClose;
+let modalImageInput;
+let selectImageBtn;
+let imagePreviewContainer;
+let imagePreview;
+let imageMessageInput;
+let submitImageBtn;
+let selectedImageFile = null;
+
+document.addEventListener("DOMContentLoaded", () => {
+  imageUploadModal = document.getElementById("image-upload-modal");
+  openImageModalBtn = document.getElementById("open-image-modal-button");
+  imageModalClose = document.getElementById("image-modal-close");
+  modalImageInput = document.getElementById("modal-image-input");
+  selectImageBtn = document.getElementById("select-image-button");
+  imagePreviewContainer = document.getElementById("image-preview-container");
+  imagePreview = document.getElementById("image-preview");
+  imageMessageInput = document.getElementById("image-message-input");
+  submitImageBtn = document.getElementById("submit-image-button");
+
+  // 1. モーダルを開く
+  openImageModalBtn.addEventListener("click", () => {
+    // 状態を初期化
+    selectedImageFile = null;
+    modalImageInput.value = "";
+    imagePreview.src = "";
+    imagePreviewContainer.classList.add("hidden");
+    submitImageBtn.disabled = true;
+    submitImageBtn.textContent = "画像を送信";
+    imageModalClose.disabled = false;
+    selectImageBtn.disabled = false;
+    imageMessageInput.disabled = false;
+    imageUploadModal.classList.remove("hidden");
+  });
+
+  // 2. モーダルを閉じる（キャンセル）
+  imageModalClose.addEventListener("click", () => {
+    imageUploadModal.classList.add("hidden");
+  });
+
+  // 3. 「画像を選択する」ボタンが押されたら隠しinputを発火
+  selectImageBtn.addEventListener("click", () => {
+    modalImageInput.click();
+  });
+
+  // 4. ファイルが選択されたらプレビューを表示
+  modalImageInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    selectedImageFile = file;
+
+    // FileReaderで読み込んでプレビュー表示
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      imagePreview.src = event.target.result;
+      imagePreviewContainer.classList.remove("hidden");
+      submitImageBtn.disabled = false; // 送信ボタンを活性化
+    };
+    reader.readAsDataURL(file);
+  });
+
+  // 5. 画像を送信する（アップロード & Firestore書き込み）
+  submitImageBtn.addEventListener("click", async () => {
+    if (!selectedImageFile) return;
+
+    // UIを「アップロード中」に変更して入力をロック
+    submitImageBtn.disabled = true;
+    imageModalClose.disabled = true; // 閉じるボタンを無効化
+    selectImageBtn.disabled = true;
+    submitImageBtn.textContent = "画像をアップロード中...";
+    imageMessageInput.disabled = true;
+
+    try {
+      // a. Firestoreから管理者のImgBB APIキーを安全に取得
+      const keyDoc = await db.collection("system_keys").doc("imgbb").get();
+      if (!keyDoc.exists) {
+        throw new Error("APIキーの設定が見つかりません。セキュリティルールかドキュメントを確認してください。");
+      }
+      const imgbbApiKey = keyDoc.data().apiKey;
+
+      // b. ImgBBにFormDataを使ってアップロード
+      const formData = new FormData();
+      formData.append("image", selectedImageFile);
+
+      const response = await fetch(`https://api.imgbb.com/1/upload?key=${imgbbApiKey}`, {
+        method: "POST",
+        body: formData
+      });
+
+      const result = await response.json();
+
+      if (!result.success) {
+        throw new Error("ImgBBのアップロード処理に失敗しました。");
+      }
+
+      const imageUrl = result.data.url;
+
+      // c. 現在のトークルーム（talkId）のtalkに画像メッセージを追加（任意のキャプション付き）
+      await db.collection("KokoKengaku").doc(talkId).collection("talk").add({
+        userId: myUserId,
+        message: imageMessageInput.value,
+        imageUrl: imageUrl,
+        readBy: [],
+        time: firebase.firestore.FieldValue.serverTimestamp()
+      });
+
+      // ルーム一覧側の未読カウント・並び順のためにlastUpdatedAtも更新
+      await db.collection("KokoKengaku").doc(talkId).update({
+        lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      });
+
+      console.log("画像送信が完了しました！");
+
+      // d. 成功したら自動的にモーダルを閉じる
+      imageUploadModal.classList.add("hidden");
+      imageMessageInput.value = "";
+    } catch (error) {
+      console.error("画像送信中にエラーが発生しました:", error);
+      alert("画像の送信に失敗しました。\n" + error.message);
+      
+      // エラー時はユーザーがやり直せるようにボタンのロックを解除
+      submitImageBtn.disabled = false;
+      submitImageBtn.textContent = "画像を送信";
+      imageModalClose.disabled = false;
+      selectImageBtn.disabled = false;
+      imageMessageInput.disabled = false;
+    }
+  });
+});
