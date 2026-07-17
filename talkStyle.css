@@ -51,6 +51,9 @@ a {
   color: var(--primary);
 }
 .hidden {
+  display: none !important;
+}
+.visually-hidden-input {
   display: none;
 }
 .split-line {
@@ -93,6 +96,49 @@ a {
 #loading-overlay.hidden,
 #no-active-overlay.hidden {
   display: none;
+}
+
+/* --- 汎用ボタン（ドロワー・各種モーダルで共通使用） --- */
+.normal-button {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-weight: 700;
+  font-size: 0.95rem;
+  padding: 0.7rem;
+  width: 100%;
+  margin-top: 0.5rem;
+  text-align: center;
+  cursor: pointer;
+  display: block;
+  box-sizing: border-box;
+  background-color: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+  transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease), background-color 0.2s var(--ease);
+}
+.normal-button:hover:not(:disabled) {
+  background-color: var(--primary-dark);
+  box-shadow: var(--shadow-md);
+}
+.normal-button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+.normal-button:disabled {
+  background-color: #dbe0e6;
+  color: #9aa4ae;
+  border: none;
+  box-shadow: none;
+}
+.normal-button.logout-button {
+  background-color: var(--surface-alt);
+  color: #d64545;
+  box-shadow: none;
+  border: 1.5px solid var(--border);
+}
+.normal-button.logout-button:hover:not(:disabled) {
+  background-color: #fdecec;
+  border-color: #f3c8c8;
 }
 
 
@@ -202,48 +248,6 @@ a {
   font-size: 0.92rem;
   margin-bottom: 0.6rem;
   color: var(--text);
-}
-
-.drawer button.normal-button {
-  font-family: "BIZ UDGothic", sans-serif;
-  font-weight: 700;
-  font-size: 0.95rem;
-  padding: 0.7rem;
-  width: 100%;
-  margin-top: 0.5rem;
-  text-align: center;
-  cursor: pointer;
-  display: block;
-  box-sizing: border-box;
-  background-color: var(--primary);
-  color: #fff;
-  border: none;
-  border-radius: var(--radius-md);
-  box-shadow: var(--shadow-sm);
-  transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease), background-color 0.2s var(--ease);
-}
-.drawer button.normal-button:hover:not(:disabled) {
-  background-color: var(--primary-dark);
-  box-shadow: var(--shadow-md);
-}
-.drawer button.normal-button:active:not(:disabled) {
-  transform: scale(0.98);
-}
-.drawer button.normal-button:disabled {
-  background-color: #dbe0e6;
-  color: #9aa4ae;
-  border: none;
-  box-shadow: none;
-}
-.drawer .logout-button {
-  background-color: var(--surface-alt);
-  color: #d64545;
-  box-shadow: none;
-  border: 1.5px solid var(--border);
-}
-.drawer .logout-button:hover {
-  background-color: #fdecec;
-  border-color: #f3c8c8;
 }
 
 .drawer input {
@@ -575,6 +579,47 @@ a {
   display: none;
 }
 
+/* --- 画像送信モーダル専用スタイル --- */
+.image-preview-container {
+  max-width: 100%;
+  max-height: 260px;
+  overflow: hidden;
+  border-radius: var(--radius-md);
+  border: 1.5px solid var(--border);
+  margin-top: 1rem;
+}
+.image-preview-container.hidden {
+  display: none;
+}
+.image-preview-container img {
+  width: 100%;
+  height: auto;
+  object-fit: contain;
+  display: block;
+}
+#image-message-input {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-weight: 500;
+  font-size: 0.95rem;
+  width: 100%;
+  padding: 0.7rem 0.9rem;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-alt);
+  margin: 1rem 0 0;
+  resize: none;
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease), background-color 0.2s var(--ease);
+}
+#image-message-input:hover {
+  border-color: #c7ccd2;
+}
+#image-message-input:focus {
+  border-color: var(--primary);
+  background-color: var(--surface);
+  box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.15);
+  outline: none;
+}
+
 
 /* --- ヘッダー領域 --- */
 #app-header {
@@ -738,9 +783,9 @@ a {
 /* --- クリック可能なユーザー要素（名前・アバター共通） --- */
 .clickable-user {
   transition: opacity 0.15s var(--ease);
-  /* text-decoration: underline;
+  text-decoration: underline;
   text-decoration-style: dotted;
-  text-underline-offset: 2px;*/
+  text-underline-offset: 2px;
 }
 .clickable-user:hover {
   opacity: 0.7;
@@ -837,7 +882,7 @@ a {
 #talk-area {
   display: flex;
   flex-direction: column;
-  height: 50vh;
+  height: 60vh;
   overflow-y: auto;
   justify-content: flex-start;
   padding: 1.25rem 1.25rem 0.5rem;
@@ -896,13 +941,7 @@ a {
   margin-bottom: 4px;
   flex-wrap: wrap;
 }
-.message .message-user span {
-  text-decoration: none;
-}
 .message .message-user .clickable-user {
-  /*text-decoration: underline;
-  text-decoration-style: dotted;
-  text-underline-offset: 2px;*/
   cursor: pointer;
 }
 
@@ -956,14 +995,50 @@ a {
   color: var(--light);
 }
 
+/* 画像メッセージ（吹き出しの中に収まるサムネイル） */
+.message .message-image {
+  display: block;
+  max-width: min(100%, 260px);
+  max-height: 260px;
+  width: auto;
+  height: auto;
+  border-radius: var(--radius-sm);
+  margin-bottom: 0.5rem;
+}
+.message-own .message-image {
+  border: 1.5px solid rgba(255, 255, 255, 0.35);
+}
+.message-other .message-image {
+  border: 1.5px solid var(--border);
+}
+
 /* --- メッセージ送信エリア --- */
 #message-add-area {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 0.9rem 1.25rem;
   background-color: var(--surface);
   border-top: 1px solid var(--border);
+}
+#open-image-modal-button {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-weight: 700;
+  font-size: 0.85rem;
+  padding: 0.6rem 0.8rem;
+  background-color: var(--primary-soft);
+  color: var(--primary-dark);
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background-color 0.2s var(--ease), transform 0.15s var(--ease);
+}
+#open-image-modal-button:hover {
+  background-color: rgba(var(--primary-rgb), 0.22);
+}
+#open-image-modal-button:active {
+  transform: scale(0.97);
 }
 #message-input {
   font-family: "BIZ UDGothic", sans-serif;
