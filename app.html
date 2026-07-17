@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="ja">
+  
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#007AB7">
+  <title>高校見学</title>
+  <meta name="apple-mobile-web-app-capable" content="yes"> 
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=BIZ+UDGothic:wght@400;700&display=swap" rel="stylesheet">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Signika+Negative:wght@300..700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="appStyle.css">
+  <link rel="icon" type="image/png" sizes="32x32" href="icon-512.png">
+  <link rel="apple-touch-icon" href="icon-512.png">
+  <link rel="icon" type="image/png" sizes="192x192" href="icon-512.png">
+  
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+</head>
+  
+<body>
+  <div id="loading-overlay">
+    <h1>loading...</h1>
+    <p>システムの読み込みに時間がかかる場合があります｡</p>
+  </div>
+  <div id="no-active-overlay" class="hidden">
+    <p>アカウントが停止されています</p>
+  </div>
+  
+  <div id="share-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <p class="title">シェア</p>
+        <span id="share-modal-close" class="close-button">&times;</span>
+      </div>
+      <img src="qrcode.png" alt="QR Code">
+    </div>
+  </div>
+  
+  <div id="drawerOverlay" class="drawer-overlay"></div>
+  <div id="accountSettingsDrawer" class="drawer">
+    <div class="drawer-header">
+      <p>アカウント設定</p>
+      <span id="drawerCloseButton" class="drawer-close-button">&times;</span>
+    </div>
+    <div class="drawer-content">
+      <div class="drawer-section">
+        <p class="title">現在のユーザー</p>
+        <p>ID: <strong id="drawerUserId">取得中...</strong><span></span></p>
+        
+        <button id="logout-button" class="logout-button normal-button">ログアウト</button>
+      </div>
+      <div class="drawer-section">
+        <p class="title">ユーザーネーム</p>
+        <p>現在の名前: <strong id="drawerUsername">取得中...</strong></p>
+        <input type="text" id="newUsernameInput" placeholder="新しい名前">
+        <button id="changeUsernameButton" class="normal-button" disabled="true">名前を変更</button>
+        <p id="username-message"></p>
+      </div>
+    </div>
+  </div>
+  
+  
+  <header id="app-header">
+    <div id="title-area">
+      <p id="header-title">螺鈿紫檀五弦琵琶と<span class="rainbow">不愉快な仲間たち</span></p>
+      <button id="share-modal-btn">シェア</button>
+    </div>
+    
+    <div id="user-data">
+      <button id="setting-button">アカウント情報</button>
+    </div>
+  </header>
+  
+  
+  <main>
+    <div id="selection-container">
+      <p id="selection-title">My Talk</p>
+      
+      <p id="talk-button-loading">loading...</p>
+      <div id="talk-button-area" class="selection">
+        
+      </div>
+    </div>
+  </main>
+  
+  <script type="module" src="appScript.js"></script>
+</body>
+</html>
