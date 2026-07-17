@@ -86,14 +86,12 @@
           <div id="profile-avatar-holder"></div>
         </div>
 
-        <!-- 名前表示/入力エリア -->
         <p id="profile-name">取得中...</p>
         <input id="profile-name-input" class="hidden" type="text" placeholder="ユーザーネーム">
 
         <p class="profile-label">ステータスメッセージ</p>
         <div id="profile-text">取得中...</div>
         <textarea id="profile-text-edit" class="hidden" placeholder="自己紹介を入力してください"></textarea>
-
         <button id="profile-edit-button" class="hidden">プロフィールを編集</button>
       </div>
     </div>
@@ -106,6 +104,25 @@
         <span id="share-modal-close" class="close-button">&times;</span>
       </div>
       <img src="qrcode.png" alt="QR Code">
+    </div>
+  </div>
+
+  <!-- 画像送信モーダル -->
+  <div id="image-upload-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <p class="title">画像を送信</p>
+        <span id="image-modal-close" class="close-button">&times;</span>
+      </div>
+
+      <input type="file" id="modal-image-input" accept="image/*" class="visually-hidden-input" />
+      <button id="select-image-button" class="normal-button">画像を選択する</button>
+
+      <div id="image-preview-container" class="image-preview-container hidden">
+        <img id="image-preview" src="" alt="プレビュー">
+      </div>
+      <textarea id="image-message-input" rows="3" placeholder="メッセージを添える（任意）"></textarea>
+      <button id="submit-image-button" class="normal-button" disabled>画像を送信</button>
     </div>
   </div>
   
@@ -154,6 +171,7 @@
       </div>
 
       <div id="message-add-area">
+        <button id="open-image-modal-button">画像</button>
         <textarea id="message-input" rows="5" placeholder="メッセージを入力"></textarea>
         <button id="message-add-button" disabled>送信</button>
       </div>
