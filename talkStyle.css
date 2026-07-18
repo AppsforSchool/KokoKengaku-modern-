@@ -855,7 +855,7 @@ a {
   background-color: var(--primary);
   color: #fff;
   cursor: pointer;
-  transition: background-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+  transition: background-color 0.3s var(--ease), box-shadow 0.3s var(--ease);
   box-shadow: var(--shadow-sm);
 }
 .poll-answer-button:hover:not(:disabled) {
