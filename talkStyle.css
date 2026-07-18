@@ -350,7 +350,7 @@ a {
   cursor: pointer;
 }
 .modal-content .close-button.hidden {
-  display: none;
+  display: hidden;
 }
 
 .modal-content img {
@@ -451,7 +451,48 @@ a {
 }
 .profile-avatar-wrap {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+.profile-avatar-wrap #profile-avatar-holder {
+  position: relative;
+}
+.profile-avatar-wrap.editable #profile-avatar-holder {
+  cursor: pointer;
+  transition: opacity 0.15s var(--ease);
+}
+.profile-avatar-wrap.editable #profile-avatar-holder:hover {
+  opacity: 0.82;
+}
+.profile-avatar-wrap.editable #profile-avatar-holder::after {
+  content: "変更";
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-sm);
+  pointer-events: none;
+}
+#profile-avatar-remove-button {
+  background: none;
+  border: none;
+  color: #d64545;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  padding: 0;
+}
+#profile-avatar-remove-button.hidden {
+  display: none;
 }
 #profile-name {
   font-size: 1.2rem;
@@ -787,9 +828,9 @@ a {
 /* --- クリック可能なユーザー要素（名前・アバター共通） --- */
 .clickable-user {
   transition: opacity 0.15s var(--ease);
-  text-decoration: underline;
+  /*text-decoration: underline;
   text-decoration-style: dotted;
-  text-underline-offset: 2px;
+  text-underline-offset: 2px;*/
 }
 .clickable-user:hover {
   opacity: 0.7;
@@ -831,6 +872,10 @@ a {
   min-width: 4.4rem;
   font-size: 1.7rem;
 }
+img.avatar-circle {
+  object-fit: cover;
+  display: block;
+}
 
 /* --- トーク上部操作エリア --- */
 #head-area {
@@ -839,6 +884,7 @@ a {
   align-items: center;
   padding: 1rem 1.5rem;
   border-bottom: 1px solid var(--border);
+  background-color: var(--surface);
 }
 #talk-title {
   font-weight: 700;
@@ -927,6 +973,7 @@ a {
   display: flex;
   flex-direction: column;
   min-width: 0;
+  gap: 6px;
 }
 .message-own .bubble-col {
   align-items: flex-end;
@@ -942,7 +989,6 @@ a {
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 4px;
   flex-wrap: wrap;
 }
 .message .message-user .clickable-user {
@@ -999,21 +1045,16 @@ a {
   color: var(--light);
 }
 
-/* 画像メッセージ（吹き出しの中に収まるサムネイル） */
+/* 画像メッセージ（吹き出しの外側、単独のサムネイルとして表示） */
 .message .message-image {
   display: block;
   max-width: min(100%, 260px);
   max-height: 260px;
   width: auto;
   height: auto;
-  border-radius: var(--radius-sm);
-  margin-bottom: 0.5rem;
-}
-.message-own .message-image {
-  border: 1.5px solid rgba(255, 255, 255, 0.35);
-}
-.message-other .message-image {
+  border-radius: var(--radius-md);
   border: 1.5px solid var(--border);
+  box-shadow: var(--shadow-sm);
 }
 
 /* --- メッセージ送信エリア --- */
@@ -1140,9 +1181,16 @@ footer p {
     margin: 0;
     border-radius: 0;
     min-height: 100vh;
+    overflow: visible;
   }
   #selection-title {
     display: none;
+  }
+  #head-area {
+    position: sticky;
+    top: var(--header-height, 56px);
+    z-index: 40;
+    box-shadow: var(--shadow-sm);
   }
   #talk-area {
     height: calc(100vh - 200px);
