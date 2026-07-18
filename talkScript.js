@@ -1410,7 +1410,7 @@ function buildPollWidget(messageDocId, choices, answerMap) {
   answerButton.type = "button";
   answerButton.classList.add("poll-answer-button");
   answerButton.textContent = hasMyAnswer ? "再回答する" : "答える";
-  answerButton.disabled = !hasMyAnswer;
+   answerButton.disabled = true;
 
   choices.forEach((choiceLabel, index) => {
     const count = Object.values(answerMap).filter((v) => v === index).length;
@@ -1424,7 +1424,7 @@ function buildPollWidget(messageDocId, choices, answerMap) {
     radio.value = String(index);
     if (myAnswerIndex === index) radio.checked = true;
     radio.addEventListener("change", () => {
-      answerButton.disabled = false;
+      answerButton.disabled = (index === myAnswerIndex);
     });
 
     const labelSpan = document.createElement("span");
