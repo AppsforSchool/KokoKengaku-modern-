@@ -19,8 +19,15 @@ let meIsAdmin = false;
 let talkId;
 
 // キャッシュ用オブジェクト
-let userCache = {};
-let userAdminCache = {};
+// ★ ユーザーデータの統一キャッシュ（name / isAdmin / imageUrl / profileText をまとめて保持）
+let userDataCache = {};
+function getUserCache(userId) {
+  return userDataCache[userId] || null;
+}
+function setUserCache(userId, data) {
+  userDataCache[userId] = Object.assign({}, userDataCache[userId] || {}, data);
+  return userDataCache[userId];
+}
 let userLastCheckedCache = {}; // ★ 最終確認日時用のキャッシュを追加
 let currentRoomMembers = [];   // ★ 現在のルームのメンバーIDリストを保持する変数を追加
 
@@ -44,8 +51,17 @@ function getInitial(name) {
   return Array.from(name.trim())[0] || "?";
 }
 
-// ★ 頭文字アバターを生成するヘルパー（size: "small" | "large" | 省略で通常サイズ）
-function createAvatar(name, size) {
+// ★ 頭文字アバター、または画像アバターを生成するヘルパー（size: "small" | "large" | 省略で通常サイズ）
+function createAvatar(name, size, imageUrl) {
+  if (imageUrl) {
+    const img = document.createElement("img");
+    img.classList.add("avatar-circle");
+    if (size === "small") img.classList.add("small");
+    if (size === "large") img.classList.add("large");
+    img.src = imageUrl;
+    img.alt = name || "";
+    return img;
+  }
   const avatar = document.createElement("div");
   avatar.classList.add("avatar-circle");
   if (size === "small") avatar.classList.add("small");
@@ -53,6 +69,26 @@ function createAvatar(name, size) {
   avatar.textContent = getInitial(name);
   return avatar;
 }
+
+// ★ スマホでヘッダー分の高さを避けて #head-area を固定表示するため、
+//   ヘッダーの実測高さを CSS 変数 --header-height に反映する
+function updateHeaderHeightVar() {
+  const header = document.getElementById("app-header");
+  if (header) {
+    document.documentElement.style.setProperty("--header-height", header.offsetHeight + "px");
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  updateHeaderHeightVar();
+  window.addEventListener("resize", updateHeaderHeightVar);
+
+  const header = document.getElementById("app-header");
+  if (header && window.ResizeObserver) {
+    const headerResizeObserver = new ResizeObserver(() => updateHeaderHeightVar());
+    headerResizeObserver.observe(header);
+  }
+});
 
 document.addEventListener("DOMContentLoaded", () => {
   loadingOverlay = document.getElementById("loading-overlay");
@@ -108,8 +144,12 @@ document.addEventListener("DOMContentLoaded", () => {
           if (meIsAdmin) drawerUsername.classList.add("admin");
           myUid = userData.uid;
 
-          userCache[myUserId] = userData.name;
-          userAdminCache[myUserId] = userData.isAdmin;
+          setUserCache(myUserId, {
+            name: userData.name,
+            isAdmin: userData.isAdmin,
+            imageUrl: userData.imageUrl || "",
+            profileText: userData.profileText || ""
+          });
 
           talkId = getParmFromUrl("id");
           // ★ メンバーのリアルタイム監視・キャッシュ化を開始
@@ -160,8 +200,12 @@ async function setupMemberSnapshots(talkId) {
           const userData = doc.data();
           
           // 各種キャッシュを最新状態に更新
-          userCache[userId] = userData.name || "名前未設定";
-          userAdminCache[userId] = userData.isAdmin || false;
+          setUserCache(userId, {
+            name: userData.name || "名前未設定",
+            isAdmin: userData.isAdmin || false,
+            imageUrl: userData.imageUrl || "",
+            profileText: userData.profileText || ""
+          });
           
           if (!userLastCheckedCache[userId]) {
             userLastCheckedCache[userId] = {};
@@ -240,22 +284,28 @@ async function getAllTalkData(talkId) {
           const messageUser = document.createElement("p");
           let senderName = "不明なユーザー";
           let isAdmin = false;
+          let senderImageUrl = "";
 
           if (messageUserId) {
-            if (!(messageUserId in userCache) || !(messageUserId in userAdminCache)) {
+            if (!getUserCache(messageUserId)) {
               const userSnapshot = await db.collection("users_random").doc(messageUserId).get();
             
               if (userSnapshot.exists) {
                 const userData = userSnapshot.data();
-                userCache[messageUserId] = userData.name || "名前未設定";
-                userAdminCache[messageUserId] = userData.isAdmin || false;
+                setUserCache(messageUserId, {
+                  name: userData.name || "名前未設定",
+                  isAdmin: userData.isAdmin || false,
+                  imageUrl: userData.imageUrl || "",
+                  profileText: userData.profileText || ""
+                });
               } else {
-                userCache[messageUserId] = "不明なユーザー";
-                userAdminCache[messageUserId] = false;
+                setUserCache(messageUserId, { name: "不明なユーザー", isAdmin: false, imageUrl: "", profileText: "" });
               }
             }
-            senderName = userCache[messageUserId];
-            isAdmin = userAdminCache[messageUserId];
+            const cached = getUserCache(messageUserId);
+            senderName = cached.name;
+            isAdmin = cached.isAdmin;
+            senderImageUrl = cached.imageUrl;
           }
 
           let displayTime = "時間不明";
@@ -317,30 +367,32 @@ async function getAllTalkData(talkId) {
             messageUser.appendChild(editSpan);
           }
 
-          const messageText = document.createElement("p");
-          messageText.classList.add("message-text");
+          // ★ アバター + 本文をまとめた行を組み立て（自分は右寄せ、相手は左寄せ＋アバター表示）
+          const bubbleCol = document.createElement("div");
+          bubbleCol.classList.add("bubble-col");
+          bubbleCol.appendChild(messageUser);
 
-          // ★ 画像があれば画像を先に、続けてテキスト（キャプション）があれば表示
+          // ★ 画像は吹き出しの外に、その下にテキストがあれば吹き出しで表示する
           if (messageData.imageUrl) {
             const img = document.createElement("img");
             img.src = messageData.imageUrl;
             img.alt = "送信された画像";
             img.classList.add("message-image");
-            messageText.appendChild(img);
+            bubbleCol.appendChild(img);
           }
-          const safeContent = sanitizeHtmlToOnlyLinks(messageData.message);
-          messageText.appendChild(safeContent);
 
-          // ★ アバター + 本文をまとめた行を組み立て（自分は右寄せ、相手は左寄せ＋アバター表示）
-          const bubbleCol = document.createElement("div");
-          bubbleCol.classList.add("bubble-col");
-          bubbleCol.appendChild(messageUser);
-          bubbleCol.appendChild(messageText);
+          if (messageData.message && messageData.message.trim() !== "") {
+            const messageText = document.createElement("p");
+            messageText.classList.add("message-text");
+            const safeContent = sanitizeHtmlToOnlyLinks(messageData.message);
+            messageText.appendChild(safeContent);
+            bubbleCol.appendChild(messageText);
+          }
 
           const messageRow = document.createElement("div");
           messageRow.classList.add("message-row");
           if (!isOwnMessage) {
-            const rowAvatar = createAvatar(senderName);
+            const rowAvatar = createAvatar(senderName, undefined, senderImageUrl);
             rowAvatar.classList.add("clickable-user");
             rowAvatar.addEventListener("click", () => {
               openProfileModal(messageUserId);
@@ -465,6 +517,32 @@ function formatDateTime(date) {
   return `${yyyy}/${mm}/${dd} ${hh}:${min}`;
 }
 
+// ★ ImgBBへの画像アップロード共通処理（チャット画像・プロフィールアイコン共通で使用）
+let imgbbApiKeyCache = null;
+async function uploadImageToImgbb(file) {
+  if (!imgbbApiKeyCache) {
+    const keyDoc = await db.collection("system_keys").doc("imgbb").get();
+    if (!keyDoc.exists) {
+      throw new Error("APIキーの設定が見つかりません。セキュリティルールかドキュメントを確認してください。");
+    }
+    imgbbApiKeyCache = keyDoc.data().apiKey;
+  }
+
+  const formData = new FormData();
+  formData.append("image", file);
+
+  const response = await fetch(`https://api.imgbb.com/1/upload?key=${imgbbApiKeyCache}`, {
+    method: "POST",
+    body: formData
+  });
+
+  const result = await response.json();
+  if (!result.success) {
+    throw new Error("ImgBBのアップロード処理に失敗しました。");
+  }
+  return result.data.url;
+}
+
 let messageInput;
 let messageAddButton;
 document.addEventListener("DOMContentLoaded", () => {
@@ -522,12 +600,14 @@ function getMember(talkId) {
   memberArea.innerHTML = "";
 
   // 自分が管理者かどうかを判定
-  const isMeAdmin = userAdminCache[myUserId] || false;
+  const isMeAdmin = (getUserCache(myUserId) || {}).isAdmin || false;
 
   // ★ 全キャッシュのキーではなく、ルームに属するメンバーIDリストでループを回す
   for (const userId of currentRoomMembers) {
-    const memberName = userCache[userId] || "不明なユーザー";
-    const isAdmin = userAdminCache[userId] || false;
+    const cached = getUserCache(userId) || {};
+    const memberName = cached.name || "不明なユーザー";
+    const isAdmin = cached.isAdmin || false;
+    const memberImageUrl = cached.imageUrl || "";
     let lastCheckedTimeStr = "";
 
     // キャッシュから対象トークルームの最終確認日時を取得
@@ -544,7 +624,7 @@ function getMember(talkId) {
     memberLeft.classList.add("member-left", "clickable-user");
     memberLeft.style.cursor = 'pointer';
 
-    const avatar = createAvatar(memberName, "small");
+    const avatar = createAvatar(memberName, "small", memberImageUrl);
     memberLeft.appendChild(avatar);
 
     const nameSpan = document.createElement("span");
@@ -648,34 +728,36 @@ async function openReadByModal(readByList) {
   const fragment = document.createDocumentFragment();
 
   for (const userId of readByList) {
-    let name = userCache[userId];
-    let isAdmin = userAdminCache[userId];
+    let cached = getUserCache(userId);
     
     // 万が一キャッシュに載っていないイレギュラーなユーザーIDが含まれていた場合のみ個別get
-    if (!name) {
+    if (!cached) {
       try {
         const userSnapshot = await db.collection("users_random").doc(userId).get();
       
         if (userSnapshot.exists) {
           const userData = userSnapshot.data();
-          userCache[userId] = userData.name || "名前未設定";
-          userAdminCache[userId] = userData.isAdmin || false;
+          cached = setUserCache(userId, {
+            name: userData.name || "名前未設定",
+            isAdmin: userData.isAdmin || false,
+            imageUrl: userData.imageUrl || "",
+            profileText: userData.profileText || ""
+          });
         } else {
-          userCache[userId] = "不明なユーザー";
-          userAdminCache[userId] = false;
+          cached = setUserCache(userId, { name: "不明なユーザー", isAdmin: false, imageUrl: "", profileText: "" });
         }
-        name = userCache[userId];
-        isAdmin = userAdminCache[userId];
       } catch (e) {
         console.error(e);
-        name = "不明なユーザー";
+        cached = { name: "不明なユーザー", isAdmin: false, imageUrl: "" };
       }
     }
+    const name = cached.name;
+    const isAdmin = cached.isAdmin;
 
     const p = document.createElement("p");
     p.classList.add("clickable-user");
     p.style.cursor = 'pointer';
-    p.appendChild(createAvatar(name, "small"));
+    p.appendChild(createAvatar(name, "small", cached.imageUrl));
     const nameSpan = document.createElement("span");
     nameSpan.textContent = name;
     if (isAdmin) nameSpan.classList.add("admin");
@@ -770,7 +852,10 @@ async function messageDelete(messageId) {
 
 let profileModal;
 let profileModalClose;
+let profileAvatarWrap;
 let profileAvatarHolder;
+let profileAvatarInput;
+let profileAvatarRemoveButton;
 let profileName;
 let profileNameInput; // 追加：編集用の名前入力欄
 let profileText;
@@ -779,12 +864,19 @@ let profileTextEdit;  // 追加：編集用の自己紹介テキストエリア
 let profileEditButton;
 let isProfileEditing = false; // 編集モード中かどうかのフラグ
 let currentProfileUserId = ""; // 現在開いているプロフィールのユーザーID
+let canEditCurrentProfile = false; // 現在開いているプロフィールが自分（or管理者権限で）編集可能か
+let profileAvatarCurrentUrl = ""; // Firestoreに保存されている現在の画像URL
+let profileAvatarFile = null; // 新しく選択された未アップロードの画像ファイル
+let profileAvatarRemoved = false; // 「画像を削除」が押されたかどうか
 
 document.addEventListener("DOMContentLoaded", () => {
   // 追加要素の取得
   profileModal = document.getElementById("profile-modal");
   profileModalClose = document.getElementById("profile-modal-close");
+  profileAvatarWrap = document.querySelector(".profile-avatar-wrap");
   profileAvatarHolder = document.getElementById("profile-avatar-holder");
+  profileAvatarInput = document.getElementById("profile-avatar-input");
+  profileAvatarRemoveButton = document.getElementById("profile-avatar-remove-button");
   profileName = document.getElementById("profile-name");
   profileNameInput = document.getElementById("profile-name-input"); // 既存DOMからあらかじめ取得
   profileText = document.getElementById("profile-text");
@@ -799,6 +891,44 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 編集・保存ボタンのクリックイベント
   profileEditButton.addEventListener("click", handleProfileEditOrSave);
+
+  // アイコンをタップ（編集モード中のみ有効）→ ファイル選択を開く
+  profileAvatarHolder.addEventListener("click", () => {
+    if (!isProfileEditing || !canEditCurrentProfile) return;
+    profileAvatarInput.click();
+  });
+
+  // ファイルが選択されたらプレビューに反映（アップロードは保存時にまとめて行う）
+  profileAvatarInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    profileAvatarFile = file;
+    profileAvatarRemoved = false;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      profileAvatarHolder.innerHTML = "";
+      const img = document.createElement("img");
+      img.classList.add("avatar-circle", "large");
+      img.src = event.target.result;
+      profileAvatarHolder.appendChild(img);
+      profileAvatarRemoveButton.classList.remove("hidden");
+    };
+    reader.readAsDataURL(file);
+  });
+
+  // 「画像を削除」→ プレビューを頭文字アバターに戻し、保存時に画像を消去
+  profileAvatarRemoveButton.addEventListener("click", () => {
+    profileAvatarFile = null;
+    profileAvatarRemoved = true;
+    profileAvatarInput.value = "";
+
+    profileAvatarHolder.innerHTML = "";
+    const nameForInitial = isProfileEditing ? profileNameInput.value : profileName.textContent;
+    profileAvatarHolder.appendChild(createAvatar(nameForInitial, "large"));
+    profileAvatarRemoveButton.classList.add("hidden");
+  });
 });
 
 // 編集モードをリセットする関数
@@ -813,6 +943,16 @@ function resetProfileEditMode() {
   if (profileNameInput) profileNameInput.classList.add("hidden");
   if (profileText) profileText.classList.remove("hidden");
   if (profileTextEdit) profileTextEdit.classList.add("hidden");
+
+  // アバターの編集用UIも隠し、未保存の変更があれば元の状態に戻す
+  if (profileAvatarWrap) profileAvatarWrap.classList.remove("editable");
+  if (profileAvatarRemoveButton) profileAvatarRemoveButton.classList.add("hidden");
+  profileAvatarFile = null;
+  profileAvatarRemoved = false;
+  if (profileAvatarHolder && profileName) {
+    profileAvatarHolder.innerHTML = "";
+    profileAvatarHolder.appendChild(createAvatar(profileName.textContent, "large", profileAvatarCurrentUrl));
+  }
 }
 
 // 編集ボタン・保存ボタンが押された時の処理
@@ -841,6 +981,14 @@ async function handleProfileEditOrSave() {
     profileTextEdit.classList.remove("hidden");
     profileTextEdit.value = currentText;
 
+    // アイコンをタップして変更できるようにする（自分／管理者のみ）
+    if (canEditCurrentProfile) {
+      profileAvatarWrap.classList.add("editable");
+      if (profileAvatarCurrentUrl) {
+        profileAvatarRemoveButton.classList.remove("hidden");
+      }
+    }
+
   } else {
     // 【保存処理】
     const newName = profileNameInput.value.trim();
@@ -855,17 +1003,35 @@ async function handleProfileEditOrSave() {
     profileEditButton.textContent = "保存中...";
 
     try {
+      // アイコン画像の変更があれば、先にアップロード（または削除）を確定させる
+      let finalImageUrl = profileAvatarCurrentUrl;
+      if (profileAvatarFile) {
+        profileEditButton.textContent = "画像をアップロード中...";
+        finalImageUrl = await uploadImageToImgbb(profileAvatarFile);
+      } else if (profileAvatarRemoved) {
+        finalImageUrl = "";
+      }
+
+      profileEditButton.textContent = "保存中...";
+
       // Firestoreの users_random コレクションを更新
       await db.collection("users_random").doc(currentProfileUserId).set(
         {
           name: newName,
-          profileText: newProfileText
+          profileText: newProfileText,
+          imageUrl: finalImageUrl
         },
         { merge: true }
       );
 
-      // キャッシュ情報の更新
-      userCache[currentProfileUserId] = newName;
+      // キャッシュ情報の更新（name / isAdmin / imageUrl / profileText を一括で最新化）
+      const cached = getUserCache(currentProfileUserId) || {};
+      setUserCache(currentProfileUserId, {
+        name: newName,
+        isAdmin: cached.isAdmin || false,
+        imageUrl: finalImageUrl,
+        profileText: newProfileText
+      });
 
       // 各UIテキストのリアルタイム更新
       drawerUsername.textContent = newName;
@@ -874,12 +1040,13 @@ async function handleProfileEditOrSave() {
       profileName.textContent = newName;
       profileText.textContent = newProfileText || "ステータスメッセージはありません。";
 
-      // アバターの頭文字も新しい名前に合わせて更新
+      profileAvatarCurrentUrl = finalImageUrl;
+      profileAvatarFile = null;
+      profileAvatarRemoved = false;
       profileAvatarHolder.innerHTML = "";
-      profileAvatarHolder.appendChild(createAvatar(newName, "large"));
+      profileAvatarHolder.appendChild(createAvatar(newName, "large", profileAvatarCurrentUrl));
 
-      const userSnapshot = await db.collection("users_random").doc(currentProfileUserId).get();
-      if (userSnapshot.exists && userSnapshot.data().isAdmin) {
+      if ((getUserCache(currentProfileUserId) || {}).isAdmin) {
         profileName.classList.add("admin");
       } else {
         profileName.classList.remove("admin");
@@ -900,47 +1067,46 @@ async function handleProfileEditOrSave() {
 // startEditModeがtrueの場合、ダイレクトに編集可能なテキストエリア等を開く
 async function openProfileModal(userId, startEditMode = false) {
   currentProfileUserId = userId; // 現在開いているユーザーIDを保持
+  canEditCurrentProfile = meIsAdmin || userId === myUserId;
   resetProfileEditMode();       // 編集状態を初期化
 
-  // DOMを初期表示に戻す
-  profileName.textContent = "取得中...";
-  profileText.textContent = "取得中...";
-  profileName.classList.remove("admin"); // 一旦リセット
+  // ★ キャッシュがあれば先にそれを表示し（体感速度優先）、裏で最新データに更新する
+  const cached = getUserCache(userId);
+  profileName.textContent = (cached && cached.name) || "取得中...";
+  profileName.classList.toggle("admin", !!(cached && cached.isAdmin));
+  profileText.textContent = (cached && cached.profileText) || "取得中...";
+  profileAvatarCurrentUrl = (cached && cached.imageUrl) || "";
 
   profileAvatarHolder.innerHTML = "";
-  profileAvatarHolder.appendChild(createAvatar(userCache[userId] || "", "large"));
-  
-  profileEditButton.classList.add("hidden");
+  profileAvatarHolder.appendChild(createAvatar(profileName.textContent, "large", profileAvatarCurrentUrl));
+
+  profileEditButton.classList.toggle("hidden", !canEditCurrentProfile);
   profileModal.classList.remove("hidden");
 
   try {
     const userSnapshot = await db.collection("users_random").doc(userId).get();
     if (userSnapshot.exists) {
       const userData = userSnapshot.data();
+
+      // ★ ユーザーデータをまとめてキャッシュに反映
+      setUserCache(userId, {
+        name: userData.name || "名前未設定",
+        isAdmin: userData.isAdmin || false,
+        imageUrl: userData.imageUrl || "",
+        profileText: userData.profileText || ""
+      });
+
       profileName.textContent = userData.name || "名前未設定";
-      
-      // 管理者ならレインボーのクラスを追加
-      if (userData.isAdmin) {
-        profileName.classList.add("admin");
-      }
-
-      userCache[userId] = userData.name || "名前未設定";
-      userAdminCache[userId] = userData.isAdmin || false;
-
-      // 名前が確定したのでアバターの頭文字も更新
-      profileAvatarHolder.innerHTML = "";
-      profileAvatarHolder.appendChild(createAvatar(userData.name || "名前未設定", "large"));
-
+      profileName.classList.toggle("admin", !!userData.isAdmin);
       profileText.textContent = userData.profileText || "ステータスメッセージはありません。";
+      profileAvatarCurrentUrl = userData.imageUrl || "";
 
-      // ★ 自分のプロフィールだった場合のみ、編集ボタンを表示する
-      if (meIsAdmin || userId === myUserId) {
-        profileEditButton.classList.remove("hidden");
-        
-        // ドロワーから来たなどの場合は即座に編集モードに移行する
-        if (startEditMode) {
-          handleProfileEditOrSave();
-        }
+      profileAvatarHolder.innerHTML = "";
+      profileAvatarHolder.appendChild(createAvatar(profileName.textContent, "large", profileAvatarCurrentUrl));
+
+      // ドロワーから来たなどの場合は即座に編集モードに移行する
+      if (canEditCurrentProfile && startEditMode) {
+        handleProfileEditOrSave();
       }
     } else {
       profileName.textContent = "不明なユーザー";
@@ -1030,31 +1196,9 @@ document.addEventListener("DOMContentLoaded", () => {
     imageMessageInput.disabled = true;
 
     try {
-      // a. Firestoreから管理者のImgBB APIキーを安全に取得
-      const keyDoc = await db.collection("system_keys").doc("imgbb").get();
-      if (!keyDoc.exists) {
-        throw new Error("APIキーの設定が見つかりません。セキュリティルールかドキュメントを確認してください。");
-      }
-      const imgbbApiKey = keyDoc.data().apiKey;
+      const imageUrl = await uploadImageToImgbb(selectedImageFile);
 
-      // b. ImgBBにFormDataを使ってアップロード
-      const formData = new FormData();
-      formData.append("image", selectedImageFile);
-
-      const response = await fetch(`https://api.imgbb.com/1/upload?key=${imgbbApiKey}`, {
-        method: "POST",
-        body: formData
-      });
-
-      const result = await response.json();
-
-      if (!result.success) {
-        throw new Error("ImgBBのアップロード処理に失敗しました。");
-      }
-
-      const imageUrl = result.data.url;
-
-      // c. 現在のトークルーム（talkId）のtalkに画像メッセージを追加（任意のキャプション付き）
+      // 現在のトークルーム（talkId）のtalkに画像メッセージを追加（任意のキャプション付き）
       await db.collection("KokoKengaku").doc(talkId).collection("talk").add({
         userId: myUserId,
         message: imageMessageInput.value,
