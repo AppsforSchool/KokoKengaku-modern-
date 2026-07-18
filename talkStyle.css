@@ -504,7 +504,8 @@ a {
 .member-item.admin .member-name,
 #read-area p .admin,
 #drawerUsername.admin,
-.message .message-user .admin {
+.message .message-user .admin,
+#poll-voters-area p .admin {
   background: linear-gradient(
     90deg,
     #ff5a5a, #ffbc41, #f5f551, #5eff5e, #84a1ff, #ff45ff, #ff5a5a
