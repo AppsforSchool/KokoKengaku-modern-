@@ -1273,24 +1273,36 @@ img.avatar-circle {
 /* 画像メッセージ（吹き出しの外側、単独のサムネイルとして表示） */
 .message .message-image-wrap {
   display: block;
-  width: min(260px, 100%);
-  aspect-ratio: 1 / 1;
+  position: relative;
+  width: 260px;
+  height: 260px;
+  max-width: 100%;
   border-radius: var(--radius-md);
-  border: 1.5px solid var(--border);
-  box-shadow: var(--shadow-sm);
-  overflow: hidden;
   background-color: var(--surface-alt);
+}
+.message .message-image-wrap.loaded {
+  width: auto;
+  height: auto;
+  background-color: transparent;
 }
 .message .message-image {
   display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
+  max-width: min(100%, 260px);
+  max-height: 260px;
+  width: auto;
+  height: auto;
+  border-radius: var(--radius-md);
+  border: 1.5px solid var(--border);
+  box-shadow: var(--shadow-sm);
   opacity: 0;
+  position: absolute;
+  top: 0;
+  left: 0;
   transition: opacity 0.25s var(--ease);
 }
 .message .message-image-wrap.loaded .message-image {
   opacity: 1;
+  position: static;
 }
 
 /* --- メッセージ送信エリア --- */
