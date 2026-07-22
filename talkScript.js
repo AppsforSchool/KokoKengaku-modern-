@@ -374,19 +374,18 @@ async function getAllTalkData(talkId) {
 
           // ★ 画像は吹き出しの外に、その下にテキストがあれば吹き出しで表示する
           if (messageData.imageUrl) {
-            const imageWrap = document.createElement("div");
-            imageWrap.classList.add("message-image-wrap");
-
             const img = document.createElement("img");
-            img.src = messageData.imageUrl;   
+            img.src = messageData.imageUrl;
             img.alt = "送信された画像";
             img.classList.add("message-image");
+
             img.addEventListener("load", () => {
-              imageWrap.classList.add("loaded");
+              // 実際の画像の縦横比に書き換える（アスペクト比が変わるので、必要に応じて箱は縮む）
+              img.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
+              img.classList.add("loaded");
             });
 
-            imageWrap.appendChild(img);
-            bubbleCol.appendChild(imageWrap);
+            bubbleCol.appendChild(img);
           }
 
           if (messageData.message && messageData.message.trim() !== "") {
