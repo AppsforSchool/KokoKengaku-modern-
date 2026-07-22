@@ -374,11 +374,19 @@ async function getAllTalkData(talkId) {
 
           // ★ 画像は吹き出しの外に、その下にテキストがあれば吹き出しで表示する
           if (messageData.imageUrl) {
+            const imageWrap = document.createElement("div");
+            imageWrap.classList.add("message-image-wrap");
+
             const img = document.createElement("img");
-            img.src = messageData.imageUrl;
+            img.src = messageData.imageUrl;   
             img.alt = "送信された画像";
             img.classList.add("message-image");
-            bubbleCol.appendChild(img);
+            img.addEventListener("load", () => {
+              imageWrap.classList.add("loaded");
+            });
+
+            imageWrap.appendChild(img);
+            bubbleCol.appendChild(imageWrap);
           }
 
           if (messageData.message && messageData.message.trim() !== "") {
