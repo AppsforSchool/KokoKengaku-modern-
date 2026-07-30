@@ -150,6 +150,9 @@ function buildReplyContext(replyTargetId, messagesById) {
   const targetName = cached.name || "不明なユーザー";
   label.textContent = `${targetName}に返信`;
 
+  // ★ 引用元メッセージが自分のものなら青、そうでなければ薄いグレーにする
+  quote.classList.add(target.userId === myUserId ? "reply-context-quote-own" : "reply-context-quote-other");
+
   let snippetText = "";
   if (target.message && target.message.trim() !== "") {
     snippetText = stripTagsToPlainText(target.message);
@@ -481,16 +484,16 @@ async function getAllTalkData(talkId) {
             messageUser.appendChild(editSpan);
           }
 
-          // ★ 返信先がある場合、メッセージの上に「〇〇に返信」ラベル＋引用バブルを表示する
-          if (messageData.replyTo) {
-            const replyContext = buildReplyContext(messageData.replyTo, messagesById);
-            message.appendChild(replyContext);
-          }
-
           // ★ アバター + 本文をまとめた行を組み立て（自分は右寄せ、相手は左寄せ＋アバター表示）
           const bubbleCol = document.createElement("div");
           bubbleCol.classList.add("bubble-col");
           bubbleCol.appendChild(messageUser);
+
+          // ★ 表示順：送信者・日付など → 返信元のメッセージ → 今回のメッセージ
+          if (messageData.replyTo) {
+            const replyContext = buildReplyContext(messageData.replyTo, messagesById);
+            bubbleCol.appendChild(replyContext);
+          }
 
           const hasText = messageData.message && messageData.message.trim() !== "";
 

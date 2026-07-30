@@ -1348,8 +1348,6 @@ img.avatar-circle {
   max-width: 100%;
   padding: 0.55rem 0.9rem;
   border-radius: var(--radius-md);
-  background-color: var(--primary-soft);
-  color: var(--primary-dark);
   font-size: 0.9rem;
   font-weight: 600;
   cursor: pointer;
@@ -1364,6 +1362,16 @@ img.avatar-circle {
 }
 .reply-context-quote:active {
   transform: scale(0.98);
+}
+/* ★ 引用元メッセージが自分のものなら青、そうでなければ薄いグレー */
+.reply-context-quote-own {
+  background-color: var(--primary);
+  color: #fff;
+}
+.reply-context-quote-other {
+  background-color: var(--surface-alt);
+  color: var(--text);
+  border: 1.5px solid var(--border);
 }
 .reply-context-quote.reply-context-quote-missing {
   cursor: default;
