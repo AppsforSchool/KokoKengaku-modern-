@@ -31,6 +31,14 @@ function setUserCache(userId, data) {
 let userLastCheckedCache = {}; // ★ 最終確認日時用のキャッシュを追加
 let currentRoomMembers = [];   // ★ 現在のルームのメンバーIDリストを保持する変数を追加
 
+// ★ 返信機能用の状態
+let replyToId = null;               // 返信先メッセージのドキュメントID
+let replyPreviewBar;
+let replyPreviewText;
+let replyPreviewCancel;
+let backToOriginalButton;
+let scrollBeforeJump = null;        // ジャンプ前のスクロール位置を一時保存
+
 // onSnapshotのリスナー解除用
 let memberSubscribers = [];
 
@@ -77,6 +85,105 @@ function updateHeaderHeightVar() {
   if (header) {
     document.documentElement.style.setProperty("--header-height", header.offsetHeight + "px");
   }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  replyPreviewBar = document.getElementById("reply-preview-bar");
+  replyPreviewText = document.getElementById("reply-preview-text");
+  replyPreviewCancel = document.getElementById("reply-preview-cancel");
+  backToOriginalButton = document.getElementById("back-to-original-button");
+
+  replyPreviewCancel.addEventListener("click", cancelReply);
+  backToOriginalButton.addEventListener("click", () => {
+    const talkArea = document.getElementById("talk-area");
+    if (scrollBeforeJump !== null) {
+      talkArea.scrollTop = scrollBeforeJump;
+    }
+    scrollBeforeJump = null;
+    backToOriginalButton.classList.add("hidden");
+  });
+});
+
+// ★ 返信対象をセットし、メッセージ入力欄の上に「〇〇に返信」を表示する
+function startReply(docId, userName) {
+  replyToId = docId;
+  replyPreviewText.textContent = `${userName}に返信`;
+  replyPreviewBar.classList.remove("hidden");
+  if (messageInput) messageInput.focus();
+}
+
+// ★ 返信状態を解除する
+function cancelReply() {
+  replyToId = null;
+  replyPreviewBar.classList.add("hidden");
+}
+
+// ★ 引用元メッセージのテキストからタグを除いたプレーンテキストを取り出す
+function stripTagsToPlainText(htmlString) {
+  const doc = new DOMParser().parseFromString(htmlString, "text/html");
+  return (doc.body.textContent || "").trim();
+}
+
+// ★ メッセージ本文の上に表示する「返信元プレビュー」の1行ブロックを組み立てる
+function buildReplyQuote(replyTargetId, messagesById) {
+  const quote = document.createElement("div");
+  quote.classList.add("reply-quote");
+
+  const target = messagesById[replyTargetId];
+  if (!target) {
+    quote.classList.add("reply-quote-missing");
+    const textSpan = document.createElement("span");
+    textSpan.classList.add("reply-quote-text");
+    textSpan.textContent = "元のメッセージは見つかりません";
+    quote.appendChild(textSpan);
+    return quote;
+  }
+
+  const cached = getUserCache(target.userId) || {};
+  const targetName = cached.name || "不明なユーザー";
+
+  let snippetText = "";
+  if (target.message && target.message.trim() !== "") {
+    snippetText = stripTagsToPlainText(target.message);
+  } else if (target.imageUrl) {
+    snippetText = "[画像]";
+  } else if (Array.isArray(target.choices) && target.choices.length > 0) {
+    snippetText = `[アンケート] ${target.message || ""}`;
+  }
+
+  const nameSpan = document.createElement("span");
+  nameSpan.classList.add("reply-quote-user");
+  nameSpan.textContent = targetName;
+
+  const textSpan = document.createElement("span");
+  textSpan.classList.add("reply-quote-text");
+  textSpan.textContent = snippetText;
+
+  quote.appendChild(nameSpan);
+  quote.appendChild(textSpan);
+
+  quote.addEventListener("click", () => {
+    jumpToMessage(replyTargetId);
+  });
+
+  return quote;
+}
+
+// ★ 指定したメッセージまでスクロールしてジャンプし、「元のメッセージにもどる」ボタンを表示する
+function jumpToMessage(targetId) {
+  const targetEl = document.getElementById("msg-" + targetId);
+  if (!targetEl) return;
+
+  const talkArea = document.getElementById("talk-area");
+  if (scrollBeforeJump === null && talkArea) {
+    scrollBeforeJump = talkArea.scrollTop;
+  }
+
+  targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+  targetEl.classList.add("jump-highlight");
+  setTimeout(() => targetEl.classList.remove("jump-highlight"), 1400);
+
+  if (backToOriginalButton) backToOriginalButton.classList.remove("hidden");
 }
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -272,9 +379,16 @@ async function getAllTalkData(talkId) {
         talkArea.appendChild(loadingText);
         newTalk.innerHTML = "";
 
+        // ★ 返信元メッセージを引くためのマップ（同じスナップショット内の全メッセージ）
+        const messagesById = {};
+        messageSnapshot.docs.forEach((doc) => {
+          messagesById[doc.id] = doc.data();
+        });
+
         for (const talkDoc of messageSnapshot.docs) {
           const messageData = talkDoc.data();
           const message = document.createElement("div");
+          message.id = "msg-" + talkDoc.id; // ★ 返信ジャンプ先として参照するためのID
           message.classList.add("message");
 
           const messageUserId = messageData.userId;
@@ -356,12 +470,23 @@ async function getAllTalkData(talkId) {
             openEditModal(talkDoc.id, messageData.userId, messageData.message);
           });
 
+          // ★ 返信ボタン（どのメッセージにも表示）
+          const replySpan = document.createElement("span");
+          replySpan.textContent = `↩︎`;
+          replySpan.classList.add("reply-action");
+          replySpan.title = "返信";
+          replySpan.addEventListener("click", () => {
+            startReply(talkDoc.id, senderName);
+          });
+
           // ★ 自分の発言では吹き出しの上に自分の名前を出さない（相手の発言のみ表示）
           if (!isOwnMessage) {
             messageUser.appendChild(senderNameSpan);
           }
           messageUser.appendChild(displayTimeSpan);
           messageUser.appendChild(readSpan);
+          messageUser.appendChild(document.createTextNode(" "));
+          messageUser.appendChild(replySpan);
           if (meIsAdmin || messageData.userId === myUserId) {
             messageUser.appendChild(document.createTextNode(" "));
             messageUser.appendChild(editSpan);
@@ -371,6 +496,12 @@ async function getAllTalkData(talkId) {
           const bubbleCol = document.createElement("div");
           bubbleCol.classList.add("bubble-col");
           bubbleCol.appendChild(messageUser);
+
+          // ★ 返信先がある場合、本文の上にうっすらと元メッセージの1行プレビューを表示する
+          if (messageData.replyTo) {
+            const replyQuote = buildReplyQuote(messageData.replyTo, messagesById);
+            bubbleCol.appendChild(replyQuote);
+          }
 
           // ★ 画像は吹き出しの外に、その下にテキストがあれば吹き出しで表示する
           if (messageData.imageUrl) {
@@ -583,6 +714,7 @@ async function addMessage(talkId) {
   messageAddButton.textContent = "送信中...";
   const user = auth.currentUser;
   const myUserId = user.email.split("@")[0];
+  const replyToSnapshot = replyToId; // ★ 送信前に返信先IDを確定させておく
   try {
     await db.collection("KokoKengaku")
       .doc(talkId)
@@ -591,11 +723,13 @@ async function addMessage(talkId) {
         userId: myUserId,
         message: message,     
         readBy: [],
+        replyTo: replyToSnapshot || null,
         time: firebase.firestore.FieldValue.serverTimestamp()
       });
     await db.collection("KokoKengaku").doc(talkId).update({
       lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp() // これを追加！
     });
+    cancelReply(); // ★ 送信成功後は返信状態を解除
   }
   catch (error) {
     console.log(error);
@@ -1218,6 +1352,7 @@ document.addEventListener("DOMContentLoaded", () => {
         message: imageMessageInput.value,
         imageUrl: imageUrl,
         readBy: [],
+        replyTo: replyToId || null,
         time: firebase.firestore.FieldValue.serverTimestamp()
       });
 
@@ -1231,6 +1366,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // d. 成功したら自動的にモーダルを閉じる
       imageUploadModal.classList.add("hidden");
       imageMessageInput.value = "";
+      cancelReply(); // ★ 送信成功後は返信状態を解除
     } catch (error) {
       console.error("画像送信中にエラーが発生しました:", error);
       alert("画像の送信に失敗しました。\n" + error.message);
@@ -1383,6 +1519,7 @@ async function submitPoll() {
       choices: choices,
       answer: {},
       readBy: [],
+      replyTo: replyToId || null,
       time: firebase.firestore.FieldValue.serverTimestamp()
     });
 
@@ -1392,6 +1529,7 @@ async function submitPoll() {
 
     pollCreateModal.classList.add("hidden");
     resetPollCreateForm();
+    cancelReply(); // ★ 送信成功後は返信状態を解除
   } catch (error) {
     console.error("アンケート送信中にエラーが発生しました:", error);
     alert("アンケートの送信に失敗しました。\n" + error.message);
