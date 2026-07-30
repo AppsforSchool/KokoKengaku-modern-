@@ -124,23 +124,31 @@ function stripTagsToPlainText(htmlString) {
   return (doc.body.textContent || "").trim();
 }
 
-// ★ メッセージ本文の上に表示する「返信元プレビュー」の1行ブロックを組み立てる
-function buildReplyQuote(replyTargetId, messagesById) {
-  const quote = document.createElement("div");
-  quote.classList.add("reply-quote");
+// ★ メッセージの上に表示する「返信元プレビュー」ブロック（ラベル＋引用バブル）を組み立てる
+function buildReplyContext(replyTargetId, messagesById) {
+  const context = document.createElement("div");
+  context.classList.add("reply-context");
 
   const target = messagesById[replyTargetId];
+
+  const label = document.createElement("p");
+  label.classList.add("reply-context-label");
+
+  const quote = document.createElement("div");
+  quote.classList.add("reply-context-quote");
+
   if (!target) {
-    quote.classList.add("reply-quote-missing");
-    const textSpan = document.createElement("span");
-    textSpan.classList.add("reply-quote-text");
-    textSpan.textContent = "元のメッセージは見つかりません";
-    quote.appendChild(textSpan);
-    return quote;
+    label.textContent = "返信";
+    quote.classList.add("reply-context-quote-missing");
+    quote.textContent = "元のメッセージは見つかりません";
+    context.appendChild(label);
+    context.appendChild(quote);
+    return context;
   }
 
   const cached = getUserCache(target.userId) || {};
   const targetName = cached.name || "不明なユーザー";
+  label.textContent = `${targetName}に返信`;
 
   let snippetText = "";
   if (target.message && target.message.trim() !== "") {
@@ -150,23 +158,15 @@ function buildReplyQuote(replyTargetId, messagesById) {
   } else if (Array.isArray(target.choices) && target.choices.length > 0) {
     snippetText = `[アンケート] ${target.message || ""}`;
   }
-
-  const nameSpan = document.createElement("span");
-  nameSpan.classList.add("reply-quote-user");
-  nameSpan.textContent = targetName;
-
-  const textSpan = document.createElement("span");
-  textSpan.classList.add("reply-quote-text");
-  textSpan.textContent = snippetText;
-
-  quote.appendChild(nameSpan);
-  quote.appendChild(textSpan);
+  quote.textContent = snippetText;
 
   quote.addEventListener("click", () => {
     jumpToMessage(replyTargetId);
   });
 
-  return quote;
+  context.appendChild(label);
+  context.appendChild(quote);
+  return context;
 }
 
 // ★ 指定したメッセージまでスクロールしてジャンプし、「元のメッセージにもどる」ボタンを表示する
@@ -481,6 +481,12 @@ async function getAllTalkData(talkId) {
             messageUser.appendChild(editSpan);
           }
 
+          // ★ 返信先がある場合、メッセージの上に「〇〇に返信」ラベル＋引用バブルを表示する
+          if (messageData.replyTo) {
+            const replyContext = buildReplyContext(messageData.replyTo, messagesById);
+            message.appendChild(replyContext);
+          }
+
           // ★ アバター + 本文をまとめた行を組み立て（自分は右寄せ、相手は左寄せ＋アバター表示）
           const bubbleCol = document.createElement("div");
           bubbleCol.classList.add("bubble-col");
@@ -488,19 +494,8 @@ async function getAllTalkData(talkId) {
 
           const hasText = messageData.message && messageData.message.trim() !== "";
 
-          // ★ 返信先がある場合の元メッセージプレビュー（未使用ならあとで単独表示にフォールバック）
-          let replyQuoteEl = messageData.replyTo
-            ? buildReplyQuote(messageData.replyTo, messagesById)
-            : null;
-
           // ★ 画像は吹き出しの外に、その下にテキストがあれば吹き出しで表示する
           if (messageData.imageUrl) {
-            // テキストが無い画像単独メッセージの場合は、画像の直上に返信プレビューを単独表示
-            if (replyQuoteEl && !hasText) {
-              bubbleCol.appendChild(replyQuoteEl);
-              replyQuoteEl = null;
-            }
-
             const img = document.createElement("img");
             img.src = messageData.imageUrl;
             img.alt = "送信された画像";
@@ -515,74 +510,44 @@ async function getAllTalkData(talkId) {
             bubbleCol.appendChild(img);
           }
 
-          // ★ テキスト本文＋返信矢印を横並びにし、本文がある場合は返信プレビューを吹き出しに直結して表示する
-          let bubbleContentRow = null;
+          // ★ 返信矢印を作る共通ヘルパー
+          const makeReplyIcon = () => {
+            const replyIcon = document.createElement("span");
+            replyIcon.textContent = "↩︎";
+            replyIcon.classList.add("reply-action");
+            replyIcon.title = "返信";
+            replyIcon.addEventListener("click", () => {
+              startReply(talkDoc.id, senderName);
+            });
+            return replyIcon;
+          };
+
+          // ★ テキスト本文＋返信矢印を横並びに配置する
           if (hasText) {
             const messageText = document.createElement("p");
             messageText.classList.add("message-text");
             const safeContent = sanitizeHtmlToOnlyLinks(messageData.message);
             messageText.appendChild(safeContent);
 
-            let bubbleBlock = messageText;
-            if (replyQuoteEl) {
-              // 返信プレビューを吹き出しの上部に直結させ、1つの吹き出しのように見せる
-              replyQuoteEl.classList.add("attached");
-              messageText.classList.add("attached-below");
-              const bubbleGroup = document.createElement("div");
-              bubbleGroup.classList.add("bubble-group");
-              bubbleGroup.appendChild(replyQuoteEl);
-              bubbleGroup.appendChild(messageText);
-              bubbleBlock = bubbleGroup;
-              replyQuoteEl = null;
-            }
-
-            // ★ 吹き出しのすぐ横に返信矢印を配置する
-            bubbleContentRow = document.createElement("div");
+            const bubbleContentRow = document.createElement("div");
             bubbleContentRow.classList.add("bubble-content-row");
-            bubbleContentRow.appendChild(bubbleBlock);
-
-            const replyIcon = document.createElement("span");
-            replyIcon.textContent = "↩︎";
-            replyIcon.classList.add("reply-action");
-            replyIcon.title = "返信";
-            replyIcon.addEventListener("click", () => {
-              startReply(talkDoc.id, senderName);
-            });
-            bubbleContentRow.appendChild(replyIcon);
+            bubbleContentRow.appendChild(messageText);
+            bubbleContentRow.appendChild(makeReplyIcon());
 
             bubbleCol.appendChild(bubbleContentRow);
           }
 
           // ★ アンケートがあれば、テキストの下にアンケートウィジェットを表示する
           if (Array.isArray(messageData.choices) && messageData.choices.length > 0) {
-            // テキストが無いアンケート単独メッセージの場合は、返信プレビューを単独表示
-            if (replyQuoteEl) {
-              bubbleCol.appendChild(replyQuoteEl);
-              replyQuoteEl = null;
-            }
             const pollWidget = buildPollWidget(talkDoc.id, messageData.choices, messageData.answer || {});
             bubbleCol.appendChild(pollWidget);
-          }
-
-          // ★ 画像・テキスト・アンケートのいずれも無いメッセージへの返信プレビュー救済（通常は発生しない）
-          if (replyQuoteEl) {
-            bubbleCol.appendChild(replyQuoteEl);
-            replyQuoteEl = null;
           }
 
           // ★ テキストが無いメッセージ（画像単独・アンケート単独）にも返信矢印を出す
           if (!hasText) {
             const standaloneRow = document.createElement("div");
             standaloneRow.classList.add("bubble-content-row", "standalone-reply-row");
-
-            const replyIcon = document.createElement("span");
-            replyIcon.textContent = "↩︎";
-            replyIcon.classList.add("reply-action");
-            replyIcon.title = "返信";
-            replyIcon.addEventListener("click", () => {
-              startReply(talkDoc.id, senderName);
-            });
-            standaloneRow.appendChild(replyIcon);
+            standaloneRow.appendChild(makeReplyIcon());
             bubbleCol.appendChild(standaloneRow);
           }
 
