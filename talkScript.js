@@ -393,6 +393,10 @@ async function getAllTalkData(talkId) {
 
         for (const talkDoc of messageSnapshot.docs) {
           const messageData = talkDoc.data();
+
+          // ★ isDisplayがfalseのメッセージは表示しない（未設定＝過去のメッセージは表示する）
+          if (messageData.isDisplay === false) continue;
+
           const message = document.createElement("div");
           message.id = "msg-" + talkDoc.id; // ★ 返信ジャンプ先として参照するためのID
           message.classList.add("message");
@@ -1011,6 +1015,11 @@ document.addEventListener("DOMContentLoaded", () => {
     editModal.classList.add("hidden");
   });
 
+  // ★ メッセージ内容が空のときは保存ボタンを無効化する
+  newMessageInput.addEventListener("input", () => {
+    updateMessageChangeButtonState();
+  });
+
   newMessageChangeButton.addEventListener("click", async () => {
     await newMessageChange(messageId, newUserIdInput.value, newMessageInput.value);
   });
@@ -1022,16 +1031,21 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 
+function updateMessageChangeButtonState() {
+  const hasMessage = newMessageInput && newMessageInput.value.trim() !== "";
+  newMessageChangeButton.disabled = !hasMessage;
+}
+
 function openEditModal(thisMessageId, messageUserId, messageText) {
   messageId = thisMessageId;
   newUserIdInput.value = messageUserId;
   newMessageInput.value = messageText;
 
-  if (!meIsAdmin) {
-    newUserIdInput.disabled = true;
-    messageDeleteButton.disabled = true;
-  }
-  
+  // ★ 送信者IDの変更は引き続き管理者限定。削除は誰でも（自分の発言・管理者は他人の発言も）可能にする
+  newUserIdInput.disabled = !meIsAdmin;
+  messageDeleteButton.disabled = false;
+  updateMessageChangeButtonState();
+
   editModal.classList.remove("hidden");
   
 }
@@ -1042,9 +1056,20 @@ async function newMessageChange(messageId, newUserId, newMessage) {
       .doc(talkId)
       .collection("talk")
       .doc(messageId);
+
+    // ★ 変更前のメッセージ内容をchangeLogに記録する
+    const docSnapshot = await docRef.get();
+    const currentData = docSnapshot.data() || {};
+    const previousMessage = currentData.message || "";
+    const existingChangeLog = Array.isArray(currentData.changeLog) ? currentData.changeLog : [];
+    const updatedChangeLog = previousMessage !== newMessage
+      ? [...existingChangeLog, previousMessage]
+      : existingChangeLog;
+
     await docRef.update({
       userId: newUserId,
-      message: newMessage
+      message: newMessage,
+      changeLog: updatedChangeLog
     });
     alert("変更しました。");
   }
@@ -1056,11 +1081,12 @@ async function newMessageChange(messageId, newUserId, newMessage) {
 
 async function messageDelete(messageId) {
   try {
-    db.collection("KokoKengaku")
+    // ★ 実際にdeleteするのではなく、isDisplayをfalseにして非表示化する
+    await db.collection("KokoKengaku")
       .doc(talkId)
       .collection("talk")
       .doc(messageId)
-      .delete();
+      .update({ isDisplay: false });
     editModal.classList.add("hidden");
     // alert(messageId);
     alert("削除しました。");
