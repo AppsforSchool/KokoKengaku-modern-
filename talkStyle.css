@@ -403,6 +403,13 @@ a {
   border-color: var(--border);
   box-shadow: none;
 }
+#new-message-change-button:disabled {
+  background-color: #dbe0e6;
+  color: #9aa4ae;
+  box-shadow: none;
+  cursor: default;
+  transform: none;
+}
 #new-userId-input {
   font-family: "BIZ UDGothic", sans-serif;
   font-weight: 700;
