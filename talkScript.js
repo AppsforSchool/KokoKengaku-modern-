@@ -266,6 +266,9 @@ document.addEventListener("DOMContentLoaded", () => {
           await setupMemberSnapshots(talkId);
 
           getAllTalkData(talkId);
+
+          // ★ ルームごとの入力中メッセージ下書きを復元
+          restoreMessageDraft();
           
           loadingOverlay.classList.add("hidden");
       } else {
@@ -716,6 +719,7 @@ document.addEventListener("DOMContentLoaded", () => {
   
   messageInput.addEventListener("input", () => {
     updateMessageAddButtonState();
+    saveMessageDraft();
   });
   
   messageAddButton.addEventListener("click", async () => {
@@ -727,6 +731,53 @@ document.addEventListener("DOMContentLoaded", () => {
 function updateMessageAddButtonState() {
   const hasMessage = messageInput && messageInput.value.trim() !== "";
   messageAddButton.disabled = !hasMessage;
+}
+
+// ★ 入力中メッセージの下書き保存機能
+function getMessageDraftKey(id) {
+  const targetId = id || talkId;
+  return targetId ? `messageDraft_${targetId}` : null;
+}
+
+function saveMessageDraft() {
+  if (!messageInput) return;
+  const key = getMessageDraftKey();
+  if (!key) return;
+  try {
+    const value = messageInput.value;
+    if (value) {
+      localStorage.setItem(key, value);
+    } else {
+      localStorage.removeItem(key);
+    }
+  } catch (error) {
+    console.log(error);
+  }
+}
+
+function restoreMessageDraft() {
+  if (!messageInput) return;
+  const key = getMessageDraftKey();
+  if (!key) return;
+  try {
+    const savedDraft = localStorage.getItem(key);
+    if (savedDraft) {
+      messageInput.value = savedDraft;
+      updateMessageAddButtonState();
+    }
+  } catch (error) {
+    console.log(error);
+  }
+}
+
+function clearMessageDraft(id) {
+  const key = getMessageDraftKey(id);
+  if (!key) return;
+  try {
+    localStorage.removeItem(key);
+  } catch (error) {
+    console.log(error);
+  }
 }
 
 async function addMessage(talkId) {
@@ -751,6 +802,7 @@ async function addMessage(talkId) {
       lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp() // これを追加！
     });
     cancelReply(); // ★ 送信成功後は返信状態を解除
+    clearMessageDraft(talkId); // ★ 送信成功後は下書きをリセット
   }
   catch (error) {
     console.log(error);
