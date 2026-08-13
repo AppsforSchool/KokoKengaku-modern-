@@ -43,7 +43,10 @@ let scrollBeforeJump = null;        // ジャンプ前のスクロール位置�
 let memberSubscribers = [];
 
 let loadingOverlay;
+let loadingOverlayText;
+let loadingOverlaySkipButton;
 let noActiveOverlay;
+let isInitialTalkLoad = true; // ★ 初回のトーク表示時のみ画像読み込みを待ってオーバーレイを消す
 let drawerOverlay;
 let accountSettingsDrawer;
 let drawerCloseButton;
@@ -202,6 +205,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
 document.addEventListener("DOMContentLoaded", () => {
   loadingOverlay = document.getElementById("loading-overlay");
+  loadingOverlayText = document.getElementById("loading-overlay-text");
+  loadingOverlaySkipButton = document.getElementById("loading-overlay-skip-button");
   noActiveOverlay = document.getElementById("no-active-overlay");
   
   drawerOverlay = document.getElementById("drawerOverlay");
@@ -269,8 +274,8 @@ document.addEventListener("DOMContentLoaded", () => {
 
           // ★ ルームごとの入力中メッセージ下書きを復元
           restoreMessageDraft();
-          
-          loadingOverlay.classList.add("hidden");
+
+          // ★ ローディングオーバーレイは、最初のトーク表示＋画像読み込み完了まで getAllTalkData 側で消す
       } else {
         loadingOverlay.classList.add("hidden");
         noActiveOverlay.classList.remove("hidden");
@@ -359,6 +364,61 @@ const handleLogout = async () => {
   }
 };
 
+// ★ ローディングオーバーレイを即座に閉じる
+function hideLoadingOverlayNow() {
+  loadingOverlay.classList.add("hidden");
+}
+
+// ★ 渡された画像要素すべての読み込み（成功／失敗どちらでも）を待ってからオーバーレイを閉じる。
+//   読み込み中は「画像を読み込んでいます (n/m)」を表示し、「あとで読み込む」ボタンで即座にスキップできる。
+async function waitForImagesThenHideOverlay(images) {
+  if (!images || images.length === 0) {
+    hideLoadingOverlayNow();
+    return;
+  }
+
+  const total = images.length;
+  let loadedCount = 0;
+  let skipped = false;
+
+  const defaultOverlayText = "システムの読み込みに時間がかかる場合があります｡";
+  loadingOverlayText.textContent = `画像を読み込んでいます (0/${total})`;
+  loadingOverlaySkipButton.classList.remove("hidden");
+
+  const handleSkip = () => {
+    skipped = true;
+    hideLoadingOverlayNow();
+  };
+  loadingOverlaySkipButton.addEventListener("click", handleSkip, { once: true });
+
+  await Promise.all(images.map((img) => {
+    return new Promise((resolve) => {
+      const onDone = () => {
+        loadedCount++;
+        if (!skipped) {
+          loadingOverlayText.textContent = `画像を読み込んでいます (${loadedCount}/${total})`;
+        }
+        resolve();
+      };
+      // すでに読み込み済み（キャッシュ等）ならすぐ完了扱いにする
+      if (img.complete) {
+        onDone();
+        return;
+      }
+      img.addEventListener("load", onDone, { once: true });
+      img.addEventListener("error", onDone, { once: true });
+    });
+  }));
+
+  loadingOverlaySkipButton.removeEventListener("click", handleSkip);
+  loadingOverlaySkipButton.classList.add("hidden");
+  loadingOverlayText.textContent = defaultOverlayText;
+
+  if (!skipped) {
+    hideLoadingOverlayNow();
+  }
+}
+
 async function getAllTalkData(talkId) {
   const talkTitle = document.getElementById("talk-title");
   const talkArea = document.getElementById("talk-area");
@@ -390,6 +450,9 @@ async function getAllTalkData(talkId) {
         messageSnapshot.docs.forEach((doc) => {
           messagesById[doc.id] = doc.data();
         });
+
+        // ★ このスナップショットで表示するメッセージ内の画像要素を集めておく（初回表示時の読み込み待ちに使う）
+        const imagesInThisRender = [];
 
         for (const talkDoc of messageSnapshot.docs) {
           const messageData = talkDoc.data();
@@ -517,6 +580,7 @@ async function getAllTalkData(talkId) {
               img.classList.add("loaded");
             });
 
+            imagesInThisRender.push(img);
             bubbleCol.appendChild(img);
           }
 
@@ -582,6 +646,12 @@ async function getAllTalkData(talkId) {
         talkArea.scrollTop = talkArea.scrollHeight;
 
         updateLastCheckedTime(talkId, myUserId);
+
+        // ★ 初回のトーク表示時のみ、画像の読み込みが終わる（またはスキップされる）までオーバーレイを出したままにする
+        if (isInitialTalkLoad) {
+          isInitialTalkLoad = false;
+          waitForImagesThenHideOverlay(imagesInThisRender);
+        }
       });
     
   } catch (error) {
