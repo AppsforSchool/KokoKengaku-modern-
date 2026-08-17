@@ -19,16 +19,34 @@ let meIsAdmin = false;
 let talkId;
 
 // キャッシュ用オブジェクト
-let userCache = {};
-let userAdminCache = {};
+// ★ ユーザーデータの統一キャッシュ（name / isAdmin / imageUrl / profileText をまとめて保持）
+let userDataCache = {};
+function getUserCache(userId) {
+  return userDataCache[userId] || null;
+}
+function setUserCache(userId, data) {
+  userDataCache[userId] = Object.assign({}, userDataCache[userId] || {}, data);
+  return userDataCache[userId];
+}
 let userLastCheckedCache = {}; // ★ 最終確認日時用のキャッシュを追加
 let currentRoomMembers = [];   // ★ 現在のルームのメンバーIDリストを保持する変数を追加
+
+// ★ 返信機能用の状態
+let replyToId = null;               // 返信先メッセージのドキュメントID
+let replyPreviewBar;
+let replyPreviewText;
+let replyPreviewCancel;
+let backToOriginalButton;
+let scrollBeforeJump = null;        // ジャンプ前のスクロール位置を一時保存
 
 // onSnapshotのリスナー解除用
 let memberSubscribers = [];
 
 let loadingOverlay;
+let loadingOverlayText;
+let loadingOverlaySkipButton;
 let noActiveOverlay;
+let isInitialTalkLoad = true; // ★ 初回のトーク表示時のみ画像読み込みを待ってオーバーレイを消す
 let drawerOverlay;
 let accountSettingsDrawer;
 let drawerCloseButton;
@@ -38,8 +56,157 @@ let drawerLogoutButton;
 let drawerUsername;
 let drawerEditProfileButton; // ドロワーの「プロフィールを編集」ボタン
 
+// ★ アバターの頭文字を安全に取り出すヘルパー
+function getInitial(name) {
+  if (!name) return "?";
+  return Array.from(name.trim())[0] || "?";
+}
+
+// ★ 頭文字アバター、または画像アバターを生成するヘルパー（size: "small" | "large" | 省略で通常サイズ）
+function createAvatar(name, size, imageUrl) {
+  if (imageUrl) {
+    const img = document.createElement("img");
+    img.classList.add("avatar-circle");
+    if (size === "small") img.classList.add("small");
+    if (size === "large") img.classList.add("large");
+    img.src = imageUrl;
+    img.alt = name || "";
+    return img;
+  }
+  const avatar = document.createElement("div");
+  avatar.classList.add("avatar-circle");
+  if (size === "small") avatar.classList.add("small");
+  if (size === "large") avatar.classList.add("large");
+  avatar.textContent = getInitial(name);
+  return avatar;
+}
+
+// ★ スマホでヘッダー分の高さを避けて #head-area を固定表示するため、
+//   ヘッダーの実測高さを CSS 変数 --header-height に反映する
+function updateHeaderHeightVar() {
+  const header = document.getElementById("app-header");
+  if (header) {
+    document.documentElement.style.setProperty("--header-height", header.offsetHeight + "px");
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  replyPreviewBar = document.getElementById("reply-preview-bar");
+  replyPreviewText = document.getElementById("reply-preview-text");
+  replyPreviewCancel = document.getElementById("reply-preview-cancel");
+  backToOriginalButton = document.getElementById("back-to-original-button");
+
+  replyPreviewCancel.addEventListener("click", cancelReply);
+  backToOriginalButton.addEventListener("click", () => {
+    const talkArea = document.getElementById("talk-area");
+    if (scrollBeforeJump !== null) {
+      talkArea.scrollTop = scrollBeforeJump;
+    }
+    scrollBeforeJump = null;
+    backToOriginalButton.classList.add("hidden");
+  });
+});
+
+// ★ 返信対象をセットし、メッセージ入力欄の上に「〇〇に返信」を表示する
+function startReply(docId, userName) {
+  replyToId = docId;
+  replyPreviewText.textContent = `${userName}に返信`;
+  replyPreviewBar.classList.remove("hidden");
+  if (messageInput) messageInput.focus();
+}
+
+// ★ 返信状態を解除する
+function cancelReply() {
+  replyToId = null;
+  replyPreviewBar.classList.add("hidden");
+}
+
+// ★ 引用元メッセージのテキストからタグを除いたプレーンテキストを取り出す
+function stripTagsToPlainText(htmlString) {
+  const doc = new DOMParser().parseFromString(htmlString, "text/html");
+  return (doc.body.textContent || "").trim();
+}
+
+// ★ メッセージの上に表示する「返信元プレビュー」ブロック（ラベル＋引用バブル）を組み立てる
+function buildReplyContext(replyTargetId, messagesById) {
+  const context = document.createElement("div");
+  context.classList.add("reply-context");
+
+  const target = messagesById[replyTargetId];
+
+  const label = document.createElement("p");
+  label.classList.add("reply-context-label");
+
+  const quote = document.createElement("div");
+  quote.classList.add("reply-context-quote");
+
+  if (!target) {
+    label.textContent = "返信";
+    quote.classList.add("reply-context-quote-missing");
+    quote.textContent = "元のメッセージは見つかりません";
+    context.appendChild(label);
+    context.appendChild(quote);
+    return context;
+  }
+
+  const cached = getUserCache(target.userId) || {};
+  const targetName = cached.name || "不明なユーザー";
+  label.textContent = `${targetName}に返信`;
+
+  // ★ 引用元メッセージが自分のものなら青、そうでなければ薄いグレーにする
+  quote.classList.add(target.userId === myUserId ? "reply-context-quote-own" : "reply-context-quote-other");
+
+  let snippetText = "";
+  if (target.message && target.message.trim() !== "") {
+    snippetText = stripTagsToPlainText(target.message);
+  } else if (target.imageUrl) {
+    snippetText = "[画像]";
+  } else if (Array.isArray(target.choices) && target.choices.length > 0) {
+    snippetText = `[アンケート] ${target.message || ""}`;
+  }
+  quote.textContent = snippetText;
+
+  quote.addEventListener("click", () => {
+    jumpToMessage(replyTargetId);
+  });
+
+  context.appendChild(label);
+  context.appendChild(quote);
+  return context;
+}
+
+// ★ 指定したメッセージまでスクロールしてジャンプし、「元のメッセージにもどる」ボタンを表示する
+function jumpToMessage(targetId) {
+  const targetEl = document.getElementById("msg-" + targetId);
+  if (!targetEl) return;
+
+  const talkArea = document.getElementById("talk-area");
+  if (scrollBeforeJump === null && talkArea) {
+    scrollBeforeJump = talkArea.scrollTop;
+  }
+
+  targetEl.scrollIntoView({ behavior: "smooth", block: "center" });
+  targetEl.classList.add("jump-highlight");
+  setTimeout(() => targetEl.classList.remove("jump-highlight"), 1400);
+
+  if (backToOriginalButton) backToOriginalButton.classList.remove("hidden");
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  updateHeaderHeightVar();
+  window.addEventListener("resize", updateHeaderHeightVar);
+
+  const header = document.getElementById("app-header");
+  if (header && window.ResizeObserver) {
+    const headerResizeObserver = new ResizeObserver(() => updateHeaderHeightVar());
+    headerResizeObserver.observe(header);
+  }
+});
+
 document.addEventListener("DOMContentLoaded", () => {
   loadingOverlay = document.getElementById("loading-overlay");
+  loadingOverlayText = document.getElementById("loading-overlay-text");
+  loadingOverlaySkipButton = document.getElementById("loading-overlay-skip-button");
   noActiveOverlay = document.getElementById("no-active-overlay");
   
   drawerOverlay = document.getElementById("drawerOverlay");
@@ -92,16 +259,23 @@ document.addEventListener("DOMContentLoaded", () => {
           if (meIsAdmin) drawerUsername.classList.add("admin");
           myUid = userData.uid;
 
-          userCache[myUserId] = userData.name;
-          userAdminCache[myUserId] = userData.isAdmin;
+          setUserCache(myUserId, {
+            name: userData.name,
+            isAdmin: userData.isAdmin,
+            imageUrl: userData.imageUrl || "",
+            profileText: userData.profileText || ""
+          });
 
           talkId = getParmFromUrl("id");
           // ★ メンバーのリアルタイム監視・キャッシュ化を開始
           await setupMemberSnapshots(talkId);
 
           getAllTalkData(talkId);
-          
-          loadingOverlay.classList.add("hidden");
+
+          // ★ ルームごとの入力中メッセージ下書きを復元
+          restoreMessageDraft();
+
+          // ★ ローディングオーバーレイは、最初のトーク表示＋画像読み込み完了まで getAllTalkData 側で消す
       } else {
         loadingOverlay.classList.add("hidden");
         noActiveOverlay.classList.remove("hidden");
@@ -133,7 +307,7 @@ async function setupMemberSnapshots(talkId) {
     const memberUserIds = roomData.members || [];
     currentRoomMembers = memberUserIds; // ★ ルームに所属するメンバーID一覧を保持
 
-    // 既存 of リスナーがあれば念のため解除
+    // 既存のリスナーがあれば念のため解除
     memberSubscribers.forEach(unsub => unsub());
     memberSubscribers = [];
 
@@ -144,8 +318,12 @@ async function setupMemberSnapshots(talkId) {
           const userData = doc.data();
           
           // 各種キャッシュを最新状態に更新
-          userCache[userId] = userData.name || "名前未設定";
-          userAdminCache[userId] = userData.isAdmin || false;
+          setUserCache(userId, {
+            name: userData.name || "名前未設定",
+            isAdmin: userData.isAdmin || false,
+            imageUrl: userData.imageUrl || "",
+            profileText: userData.profileText || ""
+          });
           
           if (!userLastCheckedCache[userId]) {
             userLastCheckedCache[userId] = {};
@@ -186,6 +364,61 @@ const handleLogout = async () => {
   }
 };
 
+// ★ ローディングオーバーレイを即座に閉じる
+function hideLoadingOverlayNow() {
+  loadingOverlay.classList.add("hidden");
+}
+
+// ★ 渡された画像要素すべての読み込み（成功／失敗どちらでも）を待ってからオーバーレイを閉じる。
+//   読み込み中は「画像を読み込んでいます (n/m)」を表示し、「あとで読み込む」ボタンで即座にスキップできる。
+async function waitForImagesThenHideOverlay(images) {
+  if (!images || images.length === 0) {
+    hideLoadingOverlayNow();
+    return;
+  }
+
+  const total = images.length;
+  let loadedCount = 0;
+  let skipped = false;
+
+  const defaultOverlayText = "システムの読み込みに時間がかかる場合があります｡";
+  loadingOverlayText.textContent = `画像を読み込んでいます (0/${total})`;
+  loadingOverlaySkipButton.classList.remove("hidden");
+
+  const handleSkip = () => {
+    skipped = true;
+    hideLoadingOverlayNow();
+  };
+  loadingOverlaySkipButton.addEventListener("click", handleSkip, { once: true });
+
+  await Promise.all(images.map((img) => {
+    return new Promise((resolve) => {
+      const onDone = () => {
+        loadedCount++;
+        if (!skipped) {
+          loadingOverlayText.textContent = `画像を読み込んでいます (${loadedCount}/${total})`;
+        }
+        resolve();
+      };
+      // すでに読み込み済み（キャッシュ等）ならすぐ完了扱いにする
+      if (img.complete) {
+        onDone();
+        return;
+      }
+      img.addEventListener("load", onDone, { once: true });
+      img.addEventListener("error", onDone, { once: true });
+    });
+  }));
+
+  loadingOverlaySkipButton.removeEventListener("click", handleSkip);
+  loadingOverlaySkipButton.classList.add("hidden");
+  loadingOverlayText.textContent = defaultOverlayText;
+
+  if (!skipped) {
+    hideLoadingOverlayNow();
+  }
+}
+
 async function getAllTalkData(talkId) {
   const talkTitle = document.getElementById("talk-title");
   const talkArea = document.getElementById("talk-area");
@@ -212,31 +445,54 @@ async function getAllTalkData(talkId) {
         talkArea.appendChild(loadingText);
         newTalk.innerHTML = "";
 
+        // ★ 返信元メッセージを引くためのマップ（同じスナップショット内の全メッセージ）
+        const messagesById = {};
+        messageSnapshot.docs.forEach((doc) => {
+          messagesById[doc.id] = doc.data();
+        });
+
+        // ★ このスナップショットで表示するメッセージ内の画像要素を集めておく（初回表示時の読み込み待ちに使う）
+        const imagesInThisRender = [];
+
         for (const talkDoc of messageSnapshot.docs) {
           const messageData = talkDoc.data();
+
+          // ★ isDisplayがfalseのメッセージは表示しない（未設定＝過去のメッセージは表示する）
+          if (messageData.isDisplay === false) continue;
+
           const message = document.createElement("div");
+          message.id = "msg-" + talkDoc.id; // ★ 返信ジャンプ先として参照するためのID
           message.classList.add("message");
 
-          const messageUser = document.createElement("p");
           const messageUserId = messageData.userId;
+          const isOwnMessage = messageUserId === myUserId;
+          message.classList.add(isOwnMessage ? "message-own" : "message-other");
+
+          const messageUser = document.createElement("p");
           let senderName = "不明なユーザー";
           let isAdmin = false;
+          let senderImageUrl = "";
 
           if (messageUserId) {
-            if (!(messageUserId in userCache) || !(messageUserId in userAdminCache)) {
+            if (!getUserCache(messageUserId)) {
               const userSnapshot = await db.collection("users_random").doc(messageUserId).get();
             
               if (userSnapshot.exists) {
                 const userData = userSnapshot.data();
-                userCache[messageUserId] = userData.name || "名前未設定";
-                userAdminCache[messageUserId] = userData.isAdmin || false;
+                setUserCache(messageUserId, {
+                  name: userData.name || "名前未設定",
+                  isAdmin: userData.isAdmin || false,
+                  imageUrl: userData.imageUrl || "",
+                  profileText: userData.profileText || ""
+                });
               } else {
-                userCache[messageUserId] = "不明なユーザー";
-                userAdminCache[messageUserId] = false;
+                setUserCache(messageUserId, { name: "不明なユーザー", isAdmin: false, imageUrl: "", profileText: "" });
               }
             }
-            senderName = userCache[messageUserId];
-            isAdmin = userAdminCache[messageUserId];
+            const cached = getUserCache(messageUserId);
+            senderName = cached.name;
+            isAdmin = cached.isAdmin;
+            senderImageUrl = cached.imageUrl;
           }
 
           let displayTime = "時間不明";
@@ -261,16 +517,14 @@ async function getAllTalkData(talkId) {
           const readSpan = document.createElement("span");
           readSpan.textContent = `既読:${displayReadCount}人`;
           readSpan.style.textDecoration = 'underline';
+          readSpan.style.cursor = 'pointer';
           readSpan.addEventListener("click", () => {
             openReadByModal(readByList);
           });
 
           const senderNameSpan = document.createElement("span");
-          senderNameSpan.textContent = `${senderName}`;
+          senderNameSpan.textContent = `${senderName} `;
           senderNameSpan.classList.add("clickable-user");
-          senderNameSpan.style.cursor = 'pointer'; // カーソルをポインターに
-          
-          // タップ（クリック）されたらプロフィールモーダルを開く
           senderNameSpan.addEventListener("click", () => {
             openProfileModal(messageUserId);
           });
@@ -284,38 +538,106 @@ async function getAllTalkData(talkId) {
           const editSpan = document.createElement("span");
           editSpan.textContent = `編集`;
           editSpan.style.textDecoration = 'underline';
+          editSpan.style.cursor = 'pointer';
           editSpan.addEventListener("click", () => {
             openEditModal(talkDoc.id, messageData.userId, messageData.message);
           });
-          
-          messageUser.appendChild(senderNameSpan);
-          messageUser.appendChild(document.createTextNode(" "));
+
+          // ★ 自分の発言では吹き出しの上に自分の名前を出さない（相手の発言のみ表示）
+          if (!isOwnMessage) {
+            messageUser.appendChild(senderNameSpan);
+          }
           messageUser.appendChild(displayTimeSpan);
           messageUser.appendChild(readSpan);
           if (meIsAdmin || messageData.userId === myUserId) {
             messageUser.appendChild(document.createTextNode(" "));
             messageUser.appendChild(editSpan);
           }
-          message.appendChild(messageUser);
 
-          const messageText = document.createElement("p");
-          messageText.classList.add("message-text");
-          
+          // ★ アバター + 本文をまとめた行を組み立て（自分は右寄せ、相手は左寄せ＋アバター表示）
+          const bubbleCol = document.createElement("div");
+          bubbleCol.classList.add("bubble-col");
+          bubbleCol.appendChild(messageUser);
+
+          // ★ 表示順：送信者・日付など → 返信元のメッセージ → 今回のメッセージ
+          if (messageData.replyTo) {
+            const replyContext = buildReplyContext(messageData.replyTo, messagesById);
+            bubbleCol.appendChild(replyContext);
+          }
+
+          const hasText = messageData.message && messageData.message.trim() !== "";
+
+          // ★ 画像は吹き出しの外に、その下にテキストがあれば吹き出しで表示する
           if (messageData.imageUrl) {
             const img = document.createElement("img");
             img.src = messageData.imageUrl;
             img.alt = "送信された画像";
             img.classList.add("message-image");
-            messageText.appendChild(img);
-          }
-          const safeContent = sanitizeHtmlToOnlyLinks(messageData.message);
-          messageText.appendChild(safeContent);
-          if (Array.isArray(messageData.choices) && messageData.choices.length > 0) {
-            const pollWidget = buildPollWidget(talkDoc.id, messageData.choices, messageData.answer || {});
-            messageText.appendChild(pollWidget);
+
+            img.addEventListener("load", () => {
+              // 実際の画像の縦横比に書き換える（アスペクト比が変わるので、必要に応じて箱は縮む）
+              img.style.aspectRatio = `${img.naturalWidth} / ${img.naturalHeight}`;
+              img.classList.add("loaded");
+            });
+
+            imagesInThisRender.push(img);
+            bubbleCol.appendChild(img);
           }
 
-          message.appendChild(messageText);
+          // ★ 返信矢印を作る共通ヘルパー
+          const makeReplyIcon = () => {
+            const replyIcon = document.createElement("span");
+            replyIcon.textContent = "↩︎";
+            replyIcon.classList.add("reply-action");
+            replyIcon.title = "返信";
+            replyIcon.addEventListener("click", () => {
+              startReply(talkDoc.id, senderName);
+            });
+            return replyIcon;
+          };
+
+          // ★ テキスト本文＋返信矢印を横並びに配置する
+          if (hasText) {
+            const messageText = document.createElement("p");
+            messageText.classList.add("message-text");
+            const safeContent = sanitizeHtmlToOnlyLinks(messageData.message);
+            messageText.appendChild(safeContent);
+
+            const bubbleContentRow = document.createElement("div");
+            bubbleContentRow.classList.add("bubble-content-row");
+            bubbleContentRow.appendChild(messageText);
+            bubbleContentRow.appendChild(makeReplyIcon());
+
+            bubbleCol.appendChild(bubbleContentRow);
+          }
+
+          // ★ アンケートがあれば、テキストの下にアンケートウィジェットを表示する
+          if (Array.isArray(messageData.choices) && messageData.choices.length > 0) {
+            const pollWidget = buildPollWidget(talkDoc.id, messageData.choices, messageData.answer || {});
+            bubbleCol.appendChild(pollWidget);
+          }
+
+          // ★ テキストが無いメッセージ（画像単独・アンケート単独）にも返信矢印を出す
+          if (!hasText) {
+            const standaloneRow = document.createElement("div");
+            standaloneRow.classList.add("bubble-content-row", "standalone-reply-row");
+            standaloneRow.appendChild(makeReplyIcon());
+            bubbleCol.appendChild(standaloneRow);
+          }
+
+          const messageRow = document.createElement("div");
+          messageRow.classList.add("message-row");
+          if (!isOwnMessage) {
+            const rowAvatar = createAvatar(senderName, undefined, senderImageUrl);
+            rowAvatar.classList.add("clickable-user");
+            rowAvatar.addEventListener("click", () => {
+              openProfileModal(messageUserId);
+            });
+            messageRow.appendChild(rowAvatar);
+          }
+          messageRow.appendChild(bubbleCol);
+
+          message.appendChild(messageRow);
 
           newTalk.appendChild(message);
         }
@@ -324,6 +646,12 @@ async function getAllTalkData(talkId) {
         talkArea.scrollTop = talkArea.scrollHeight;
 
         updateLastCheckedTime(talkId, myUserId);
+
+        // ★ 初回のトーク表示時のみ、画像の読み込みが終わる（またはスキップされる）までオーバーレイを出したままにする
+        if (isInitialTalkLoad) {
+          isInitialTalkLoad = false;
+          waitForImagesThenHideOverlay(imagesInThisRender);
+        }
       });
     
   } catch (error) {
@@ -431,6 +759,32 @@ function formatDateTime(date) {
   return `${yyyy}/${mm}/${dd} ${hh}:${min}`;
 }
 
+// ★ ImgBBへの画像アップロード共通処理（チャット画像・プロフィールアイコン共通で使用）
+let imgbbApiKeyCache = null;
+async function uploadImageToImgbb(file) {
+  if (!imgbbApiKeyCache) {
+    const keyDoc = await db.collection("system_keys").doc("imgbb").get();
+    if (!keyDoc.exists) {
+      throw new Error("APIキーの設定が見つかりません。セキュリティルールかドキュメントを確認してください。");
+    }
+    imgbbApiKeyCache = keyDoc.data().apiKey;
+  }
+
+  const formData = new FormData();
+  formData.append("image", file);
+
+  const response = await fetch(`https://api.imgbb.com/1/upload?key=${imgbbApiKeyCache}`, {
+    method: "POST",
+    body: formData
+  });
+
+  const result = await response.json();
+  if (!result.success) {
+    throw new Error("ImgBBのアップロード処理に失敗しました。");
+  }
+  return result.data.url;
+}
+
 let messageInput;
 let messageAddButton;
 document.addEventListener("DOMContentLoaded", () => {
@@ -439,6 +793,7 @@ document.addEventListener("DOMContentLoaded", () => {
   
   messageInput.addEventListener("input", () => {
     updateMessageAddButtonState();
+    saveMessageDraft();
   });
   
   messageAddButton.addEventListener("click", async () => {
@@ -452,12 +807,60 @@ function updateMessageAddButtonState() {
   messageAddButton.disabled = !hasMessage;
 }
 
+// ★ 入力中メッセージの下書き保存機能
+function getMessageDraftKey(id) {
+  const targetId = id || talkId;
+  return targetId ? `messageDraft_${targetId}` : null;
+}
+
+function saveMessageDraft() {
+  if (!messageInput) return;
+  const key = getMessageDraftKey();
+  if (!key) return;
+  try {
+    const value = messageInput.value;
+    if (value) {
+      localStorage.setItem(key, value);
+    } else {
+      localStorage.removeItem(key);
+    }
+  } catch (error) {
+    console.log(error);
+  }
+}
+
+function restoreMessageDraft() {
+  if (!messageInput) return;
+  const key = getMessageDraftKey();
+  if (!key) return;
+  try {
+    const savedDraft = localStorage.getItem(key);
+    if (savedDraft) {
+      messageInput.value = savedDraft;
+      updateMessageAddButtonState();
+    }
+  } catch (error) {
+    console.log(error);
+  }
+}
+
+function clearMessageDraft(id) {
+  const key = getMessageDraftKey(id);
+  if (!key) return;
+  try {
+    localStorage.removeItem(key);
+  } catch (error) {
+    console.log(error);
+  }
+}
+
 async function addMessage(talkId) {
   const message = messageInput.value.trim();
   messageAddButton.disabled = true;
   messageAddButton.textContent = "送信中...";
   const user = auth.currentUser;
   const myUserId = user.email.split("@")[0];
+  const replyToSnapshot = replyToId; // ★ 送信前に返信先IDを確定させておく
   try {
     await db.collection("KokoKengaku")
       .doc(talkId)
@@ -466,11 +869,14 @@ async function addMessage(talkId) {
         userId: myUserId,
         message: message,     
         readBy: [],
+        replyTo: replyToSnapshot || null,
         time: firebase.firestore.FieldValue.serverTimestamp()
       });
     await db.collection("KokoKengaku").doc(talkId).update({
       lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp() // これを追加！
     });
+    cancelReply(); // ★ 送信成功後は返信状態を解除
+    clearMessageDraft(talkId); // ★ 送信成功後は下書きをリセット
   }
   catch (error) {
     console.log(error);
@@ -488,12 +894,14 @@ function getMember(talkId) {
   memberArea.innerHTML = "";
 
   // 自分が管理者かどうかを判定
-  const isMeAdmin = userAdminCache[myUserId] || false;
+  const isMeAdmin = (getUserCache(myUserId) || {}).isAdmin || false;
 
   // ★ 全キャッシュのキーではなく、ルームに属するメンバーIDリストでループを回す
   for (const userId of currentRoomMembers) {
-    const memberName = userCache[userId] || "不明なユーザー";
-    const isAdmin = userAdminCache[userId] || false;
+    const cached = getUserCache(userId) || {};
+    const memberName = cached.name || "不明なユーザー";
+    const isAdmin = cached.isAdmin || false;
+    const memberImageUrl = cached.imageUrl || "";
     let lastCheckedTimeStr = "";
 
     // キャッシュから対象トークルームの最終確認日時を取得
@@ -505,18 +913,25 @@ function getMember(talkId) {
     memberElement.classList.add("member-item");
     if (isAdmin) memberElement.classList.add("admin");
 
-    // 名前
+    // アバター + 名前
+    const memberLeft = document.createElement("div");
+    memberLeft.classList.add("member-left", "clickable-user");
+    memberLeft.style.cursor = 'pointer';
+
+    const avatar = createAvatar(memberName, "small", memberImageUrl);
+    memberLeft.appendChild(avatar);
+
     const nameSpan = document.createElement("span");
-    nameSpan.classList.add("member-name", "clickable-user");
+    nameSpan.classList.add("member-name");
     nameSpan.textContent = memberName;
-    nameSpan.style.cursor = 'pointer'; // カーソルをポインターに
-    
+    memberLeft.appendChild(nameSpan);
+
     // タップ（クリック）されたらプロフィールモーダルを開く
-    nameSpan.addEventListener("click", () => {
+    memberLeft.addEventListener("click", () => {
       openProfileModal(userId);
     });
-    
-    memberElement.appendChild(nameSpan);
+
+    memberElement.appendChild(memberLeft);
 
     // 自分が管理者かつデータがある場合のみ、右側に最終確認時間を追加
     if (isMeAdmin) {
@@ -607,33 +1022,45 @@ async function openReadByModal(readByList) {
   const fragment = document.createDocumentFragment();
 
   for (const userId of readByList) {
-    let name = userCache[userId];
-    let isAdmin = userAdminCache[userId];
+    let cached = getUserCache(userId);
     
     // 万が一キャッシュに載っていないイレギュラーなユーザーIDが含まれていた場合のみ個別get
-    if (!name) {
+    if (!cached) {
       try {
         const userSnapshot = await db.collection("users_random").doc(userId).get();
       
         if (userSnapshot.exists) {
           const userData = userSnapshot.data();
-          userCache[userId] = userData.name || "名前未設定";
-          userAdminCache[userId] = userData.isAdmin || false;
+          cached = setUserCache(userId, {
+            name: userData.name || "名前未設定",
+            isAdmin: userData.isAdmin || false,
+            imageUrl: userData.imageUrl || "",
+            profileText: userData.profileText || ""
+          });
         } else {
-          userCache[userId] = "不明なユーザー";
-          userAdminCache[userId] = false;
+          cached = setUserCache(userId, { name: "不明なユーザー", isAdmin: false, imageUrl: "", profileText: "" });
         }
-        name = userCache[userId];
-        isAdmin = userAdminCache[userId];
       } catch (e) {
         console.error(e);
-        name = "不明なユーザー";
+        cached = { name: "不明なユーザー", isAdmin: false, imageUrl: "" };
       }
     }
+    const name = cached.name;
+    const isAdmin = cached.isAdmin;
 
     const p = document.createElement("p");
-    p.textContent = name;
-    if (isAdmin) p.classList.add("admin");
+    p.classList.add("clickable-user");
+    p.style.cursor = 'pointer';
+    p.appendChild(createAvatar(name, "small", cached.imageUrl));
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = name;
+    if (isAdmin) nameSpan.classList.add("admin");
+    p.appendChild(nameSpan);
+
+    p.addEventListener("click", () => {
+      openProfileModal(userId);
+    });
+
     fragment.appendChild(p);
   }
 
@@ -658,6 +1085,11 @@ document.addEventListener("DOMContentLoaded", () => {
     editModal.classList.add("hidden");
   });
 
+  // ★ メッセージ内容が空のときは保存ボタンを無効化する
+  newMessageInput.addEventListener("input", () => {
+    updateMessageChangeButtonState();
+  });
+
   newMessageChangeButton.addEventListener("click", async () => {
     await newMessageChange(messageId, newUserIdInput.value, newMessageInput.value);
   });
@@ -669,16 +1101,21 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 
+function updateMessageChangeButtonState() {
+  const hasMessage = newMessageInput && newMessageInput.value.trim() !== "";
+  newMessageChangeButton.disabled = !hasMessage;
+}
+
 function openEditModal(thisMessageId, messageUserId, messageText) {
   messageId = thisMessageId;
   newUserIdInput.value = messageUserId;
   newMessageInput.value = messageText;
 
-  if (!meIsAdmin) {
-    newUserIdInput.disabled = true;
-    messageDeleteButton.disabled = true;
-  }
-  
+  // ★ 送信者IDの変更は引き続き管理者限定。削除は誰でも（自分の発言・管理者は他人の発言も）可能にする
+  newUserIdInput.disabled = !meIsAdmin;
+  messageDeleteButton.disabled = false;
+  updateMessageChangeButtonState();
+
   editModal.classList.remove("hidden");
   
 }
@@ -689,9 +1126,20 @@ async function newMessageChange(messageId, newUserId, newMessage) {
       .doc(talkId)
       .collection("talk")
       .doc(messageId);
+
+    // ★ 変更前のメッセージ内容をchangeLogに記録する
+    const docSnapshot = await docRef.get();
+    const currentData = docSnapshot.data() || {};
+    const previousMessage = currentData.message || "";
+    const existingChangeLog = Array.isArray(currentData.changeLog) ? currentData.changeLog : [];
+    const updatedChangeLog = previousMessage !== newMessage
+      ? [...existingChangeLog, previousMessage]
+      : existingChangeLog;
+
     await docRef.update({
       userId: newUserId,
-      message: newMessage
+      message: newMessage,
+      changeLog: updatedChangeLog
     });
     alert("変更しました。");
   }
@@ -703,11 +1151,12 @@ async function newMessageChange(messageId, newUserId, newMessage) {
 
 async function messageDelete(messageId) {
   try {
-    db.collection("KokoKengaku")
+    // ★ 実際にdeleteするのではなく、isDisplayをfalseにして非表示化する
+    await db.collection("KokoKengaku")
       .doc(talkId)
       .collection("talk")
       .doc(messageId)
-      .delete();
+      .update({ isDisplay: false });
     editModal.classList.add("hidden");
     // alert(messageId);
     alert("削除しました。");
@@ -719,6 +1168,10 @@ async function messageDelete(messageId) {
 
 let profileModal;
 let profileModalClose;
+let profileAvatarWrap;
+let profileAvatarHolder;
+let profileAvatarInput;
+let profileAvatarRemoveButton;
 let profileName;
 let profileNameInput; // 追加：編集用の名前入力欄
 let profileText;
@@ -727,11 +1180,19 @@ let profileTextEdit;  // 追加：編集用の自己紹介テキストエリア
 let profileEditButton;
 let isProfileEditing = false; // 編集モード中かどうかのフラグ
 let currentProfileUserId = ""; // 現在開いているプロフィールのユーザーID
+let canEditCurrentProfile = false; // 現在開いているプロフィールが自分（or管理者権限で）編集可能か
+let profileAvatarCurrentUrl = ""; // Firestoreに保存されている現在の画像URL
+let profileAvatarFile = null; // 新しく選択された未アップロードの画像ファイル
+let profileAvatarRemoved = false; // 「画像を削除」が押されたかどうか
 
 document.addEventListener("DOMContentLoaded", () => {
   // 追加要素の取得
   profileModal = document.getElementById("profile-modal");
   profileModalClose = document.getElementById("profile-modal-close");
+  profileAvatarWrap = document.querySelector(".profile-avatar-wrap");
+  profileAvatarHolder = document.getElementById("profile-avatar-holder");
+  profileAvatarInput = document.getElementById("profile-avatar-input");
+  profileAvatarRemoveButton = document.getElementById("profile-avatar-remove-button");
   profileName = document.getElementById("profile-name");
   profileNameInput = document.getElementById("profile-name-input"); // 既存DOMからあらかじめ取得
   profileText = document.getElementById("profile-text");
@@ -746,6 +1207,44 @@ document.addEventListener("DOMContentLoaded", () => {
 
   // 編集・保存ボタンのクリックイベント
   profileEditButton.addEventListener("click", handleProfileEditOrSave);
+
+  // アイコンをタップ（編集モード中のみ有効）→ ファイル選択を開く
+  profileAvatarHolder.addEventListener("click", () => {
+    if (!isProfileEditing || !canEditCurrentProfile) return;
+    profileAvatarInput.click();
+  });
+
+  // ファイルが選択されたらプレビューに反映（アップロードは保存時にまとめて行う）
+  profileAvatarInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    profileAvatarFile = file;
+    profileAvatarRemoved = false;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      profileAvatarHolder.innerHTML = "";
+      const img = document.createElement("img");
+      img.classList.add("avatar-circle", "large");
+      img.src = event.target.result;
+      profileAvatarHolder.appendChild(img);
+      profileAvatarRemoveButton.classList.remove("hidden");
+    };
+    reader.readAsDataURL(file);
+  });
+
+  // 「画像を削除」→ プレビューを頭文字アバターに戻し、保存時に画像を消去
+  profileAvatarRemoveButton.addEventListener("click", () => {
+    profileAvatarFile = null;
+    profileAvatarRemoved = true;
+    profileAvatarInput.value = "";
+
+    profileAvatarHolder.innerHTML = "";
+    const nameForInitial = isProfileEditing ? profileNameInput.value : profileName.textContent;
+    profileAvatarHolder.appendChild(createAvatar(nameForInitial, "large"));
+    profileAvatarRemoveButton.classList.add("hidden");
+  });
 });
 
 // 編集モードをリセットする関数
@@ -760,6 +1259,17 @@ function resetProfileEditMode() {
   if (profileNameInput) profileNameInput.classList.add("hidden");
   if (profileText) profileText.classList.remove("hidden");
   if (profileTextEdit) profileTextEdit.classList.add("hidden");
+  if (profileModalClose) profileModalClose.classList.remove("hidden");
+
+  // アバターの編集用UIも隠し、未保存の変更があれば元の状態に戻す
+  if (profileAvatarWrap) profileAvatarWrap.classList.remove("editable");
+  if (profileAvatarRemoveButton) profileAvatarRemoveButton.classList.add("hidden");
+  profileAvatarFile = null;
+  profileAvatarRemoved = false;
+  if (profileAvatarHolder && profileName) {
+    profileAvatarHolder.innerHTML = "";
+    profileAvatarHolder.appendChild(createAvatar(profileName.textContent, "large", profileAvatarCurrentUrl));
+  }
 }
 
 // 編集ボタン・保存ボタンが押された時の処理
@@ -780,7 +1290,6 @@ async function handleProfileEditOrSave() {
       currentName = "";
     }
 
-    // --- 【改善ポイント】中のHTMLを書き換えるのではなく、事前に配置された要素をスイッチする ---
     profileName.classList.add("hidden");
     profileNameInput.classList.remove("hidden");
     profileNameInput.value = currentName;
@@ -788,6 +1297,14 @@ async function handleProfileEditOrSave() {
     profileText.classList.add("hidden");
     profileTextEdit.classList.remove("hidden");
     profileTextEdit.value = currentText;
+
+    // アイコンをタップして変更できるようにする（自分／管理者のみ）
+    if (canEditCurrentProfile) {
+      profileAvatarWrap.classList.add("editable");
+      if (profileAvatarCurrentUrl) {
+        profileAvatarRemoveButton.classList.remove("hidden");
+      }
+    }
 
   } else {
     // 【保存処理】
@@ -801,19 +1318,37 @@ async function handleProfileEditOrSave() {
 
     profileEditButton.disabled = true;
     profileEditButton.textContent = "保存中...";
-
+    profileModalClose.classList.add("hidden");
     try {
+      // アイコン画像の変更があれば、先にアップロード（または削除）を確定させる
+      let finalImageUrl = profileAvatarCurrentUrl;
+      if (profileAvatarFile) {
+        profileEditButton.textContent = "画像をアップロード中...";
+        finalImageUrl = await uploadImageToImgbb(profileAvatarFile);
+      } else if (profileAvatarRemoved) {
+        finalImageUrl = "";
+      }
+
+      profileEditButton.textContent = "保存中...";
+
       // Firestoreの users_random コレクションを更新
       await db.collection("users_random").doc(currentProfileUserId).set(
         {
           name: newName,
-          profileText: newProfileText
+          profileText: newProfileText,
+          imageUrl: finalImageUrl
         },
         { merge: true }
       );
 
-      // キャッシュ情報の更新
-      userCache[currentProfileUserId] = newName;
+      // キャッシュ情報の更新（name / isAdmin / imageUrl / profileText を一括で最新化）
+      const cached = getUserCache(currentProfileUserId) || {};
+      setUserCache(currentProfileUserId, {
+        name: newName,
+        isAdmin: cached.isAdmin || false,
+        imageUrl: finalImageUrl,
+        profileText: newProfileText
+      });
 
       // 各UIテキストのリアルタイム更新
       drawerUsername.textContent = newName;
@@ -822,8 +1357,13 @@ async function handleProfileEditOrSave() {
       profileName.textContent = newName;
       profileText.textContent = newProfileText || "ステータスメッセージはありません。";
 
-      const userSnapshot = await db.collection("users_random").doc(currentProfileUserId).get();
-      if (userSnapshot.exists && userSnapshot.data().isAdmin) {
+      profileAvatarCurrentUrl = finalImageUrl;
+      profileAvatarFile = null;
+      profileAvatarRemoved = false;
+      profileAvatarHolder.innerHTML = "";
+      profileAvatarHolder.appendChild(createAvatar(newName, "large", profileAvatarCurrentUrl));
+
+      if ((getUserCache(currentProfileUserId) || {}).isAdmin) {
         profileName.classList.add("admin");
       } else {
         profileName.classList.remove("admin");
@@ -844,40 +1384,46 @@ async function handleProfileEditOrSave() {
 // startEditModeがtrueの場合、ダイレクトに編集可能なテキストエリア等を開く
 async function openProfileModal(userId, startEditMode = false) {
   currentProfileUserId = userId; // 現在開いているユーザーIDを保持
+  canEditCurrentProfile = meIsAdmin || userId === myUserId;
   resetProfileEditMode();       // 編集状態を初期化
 
-  // DOMを初期表示に戻す
-  profileName.textContent = "取得中...";
-  profileText.textContent = "取得中...";
-  profileName.classList.remove("admin"); // 一旦リセット
-  
-  profileEditButton.classList.add("hidden");
+  // ★ キャッシュがあれば先にそれを表示し（体感速度優先）、裏で最新データに更新する
+  const cached = getUserCache(userId);
+  profileName.textContent = (cached && cached.name) || "取得中...";
+  profileName.classList.toggle("admin", !!(cached && cached.isAdmin));
+  profileText.textContent = (cached && cached.profileText) || "取得中...";
+  profileAvatarCurrentUrl = (cached && cached.imageUrl) || "";
+
+  profileAvatarHolder.innerHTML = "";
+  profileAvatarHolder.appendChild(createAvatar(profileName.textContent, "large", profileAvatarCurrentUrl));
+
+  profileEditButton.classList.toggle("hidden", !canEditCurrentProfile);
   profileModal.classList.remove("hidden");
 
   try {
     const userSnapshot = await db.collection("users_random").doc(userId).get();
     if (userSnapshot.exists) {
       const userData = userSnapshot.data();
+
+      // ★ ユーザーデータをまとめてキャッシュに反映
+      setUserCache(userId, {
+        name: userData.name || "名前未設定",
+        isAdmin: userData.isAdmin || false,
+        imageUrl: userData.imageUrl || "",
+        profileText: userData.profileText || ""
+      });
+
       profileName.textContent = userData.name || "名前未設定";
-      
-      // 管理者ならレインボーのクラスを追加
-      if (userData.isAdmin) {
-        profileName.classList.add("admin");
-      }
-
-      userCache[userId] = userData.name || "名前未設定";
-      userAdminCache[userId] = userData.isAdmin || false;
-
+      profileName.classList.toggle("admin", !!userData.isAdmin);
       profileText.textContent = userData.profileText || "ステータスメッセージはありません。";
+      profileAvatarCurrentUrl = userData.imageUrl || "";
 
-      // ★ 自分のプロフィールだった場合のみ、編集ボタンを表示する
-      if (meIsAdmin || userId === myUserId) {
-        profileEditButton.classList.remove("hidden");
-        
-        // ドロワーから来たなどの場合は即座に編集モードに移行する
-        if (startEditMode) {
-          handleProfileEditOrSave();
-        }
+      profileAvatarHolder.innerHTML = "";
+      profileAvatarHolder.appendChild(createAvatar(profileName.textContent, "large", profileAvatarCurrentUrl));
+
+      // ドロワーから来たなどの場合は即座に編集モードに移行する
+      if (canEditCurrentProfile && startEditMode) {
+        handleProfileEditOrSave();
       }
     } else {
       profileName.textContent = "不明なユーザー";
@@ -890,6 +1436,7 @@ async function openProfileModal(userId, startEditMode = false) {
   }
 }
 
+// ★ 画像送信モーダル一式（キャプション付き）
 let imageUploadModal;
 let openImageModalBtn;
 let imageModalClose;
@@ -925,7 +1472,6 @@ document.addEventListener("DOMContentLoaded", () => {
     selectImageBtn.disabled = false;
     imageMessageInput.disabled = false;
     imageUploadModal.classList.remove("hidden");
-    
   });
 
   // 2. モーダルを閉じる（キャンセル）
@@ -967,36 +1513,15 @@ document.addEventListener("DOMContentLoaded", () => {
     imageMessageInput.disabled = true;
 
     try {
-      // a. Firestoreから管理者のImgBB APIキーを安全に取得
-      const keyDoc = await db.collection("system_keys").doc("imgbb").get();
-      if (!keyDoc.exists) {
-        throw new Error("APIキーの設定が見つかりません。セキュリティルールかドキュメントを確認してください。");
-      }
-      const imgbbApiKey = keyDoc.data().apiKey;
+      const imageUrl = await uploadImageToImgbb(selectedImageFile);
 
-      // b. ImgBBにFormDataを使ってアップロード
-      const formData = new FormData();
-      formData.append("image", selectedImageFile);
-
-      const response = await fetch(`https://api.imgbb.com/1/upload?key=${imgbbApiKey}`, {
-        method: "POST",
-        body: formData
-      });
-
-      const result = await response.json();
-
-      if (!result.success) {
-        throw new Error("ImgBBのアップロード処理に失敗しました。");
-      }
-
-      const imageUrl = result.data.url;
-
-      // c. 現在のトークルーム（talkId）のtalkに画像メッセージを追加
+      // 現在のトークルーム（talkId）のtalkに画像メッセージを追加（任意のキャプション付き）
       await db.collection("KokoKengaku").doc(talkId).collection("talk").add({
         userId: myUserId,
         message: imageMessageInput.value,
         imageUrl: imageUrl,
         readBy: [],
+        replyTo: replyToId || null,
         time: firebase.firestore.FieldValue.serverTimestamp()
       });
 
@@ -1010,6 +1535,7 @@ document.addEventListener("DOMContentLoaded", () => {
       // d. 成功したら自動的にモーダルを閉じる
       imageUploadModal.classList.add("hidden");
       imageMessageInput.value = "";
+      cancelReply(); // ★ 送信成功後は返信状態を解除
     } catch (error) {
       console.error("画像送信中にエラーが発生しました:", error);
       alert("画像の送信に失敗しました。\n" + error.message);
@@ -1027,6 +1553,7 @@ document.addEventListener("DOMContentLoaded", () => {
 // ================================
 // ★ アンケート機能
 // ================================
+
 const POLL_MIN_CHOICES = 2;
 const POLL_MAX_CHOICES = 10;
 
@@ -1161,6 +1688,7 @@ async function submitPoll() {
       choices: choices,
       answer: {},
       readBy: [],
+      replyTo: replyToId || null,
       time: firebase.firestore.FieldValue.serverTimestamp()
     });
 
@@ -1170,6 +1698,7 @@ async function submitPoll() {
 
     pollCreateModal.classList.add("hidden");
     resetPollCreateForm();
+    cancelReply(); // ★ 送信成功後は返信状態を解除
   } catch (error) {
     console.error("アンケート送信中にエラーが発生しました:", error);
     alert("アンケートの送信に失敗しました。\n" + error.message);
@@ -1195,7 +1724,7 @@ function buildPollWidget(messageDocId, choices, answerMap) {
   answerButton.type = "button";
   answerButton.classList.add("poll-answer-button");
   answerButton.textContent = hasMyAnswer ? "再回答する" : "答える";
-  answerButton.disabled = true;
+   answerButton.disabled = true;
 
   choices.forEach((choiceLabel, index) => {
     const count = Object.values(answerMap).filter((v) => v === index).length;
@@ -1252,7 +1781,7 @@ function buildPollWidget(messageDocId, choices, answerMap) {
       answerButton.disabled = false;
       answerButton.textContent = originalText;
     }
-    // 成功時はメッセージ一覧のリアルタイム再描画（onSnapshot）で新しい状態に置き換わる
+    // 成功時はメッセージ一覧のリアルタイム再描画で新しい状態に置き換わる
   });
 
   widget.appendChild(answerButton);
@@ -1288,41 +1817,47 @@ async function openPollVotersModal(answerMap, choiceIndex, choiceLabel) {
   if (voterIds.length === 0) {
     const emptyMessage = document.createElement("p");
     emptyMessage.textContent = "まだ誰も選んでいません";
-    emptyMessage.style.color = "#808080";
-    emptyMessage.style.cursor = "default";
+    emptyMessage.style.color = "var(--text-muted)";
     fragment.appendChild(emptyMessage);
   }
 
-  // ★ 既読モーダル（openReadByModal）と同じく、既存のユーザーキャッシュを最優先で利用する
   for (const userId of voterIds) {
-    let name = userCache[userId];
-    let isAdmin = userAdminCache[userId];
+    let cached = getUserCache(userId);
 
-    if (!name) {
+    // 万が一キャッシュに載っていないイレギュラーなユーザーIDが含まれていた場合のみ個別get
+    if (!cached) {
       try {
         const userSnapshot = await db.collection("users_random").doc(userId).get();
         if (userSnapshot.exists) {
           const userData = userSnapshot.data();
-          userCache[userId] = userData.name || "名前未設定";
-          userAdminCache[userId] = userData.isAdmin || false;
+          cached = setUserCache(userId, {
+            name: userData.name || "名前未設定",
+            isAdmin: userData.isAdmin || false,
+            imageUrl: userData.imageUrl || "",
+            profileText: userData.profileText || ""
+          });
         } else {
-          userCache[userId] = "不明なユーザー";
-          userAdminCache[userId] = false;
+          cached = setUserCache(userId, { name: "不明なユーザー", isAdmin: false, imageUrl: "", profileText: "" });
         }
-        name = userCache[userId];
-        isAdmin = userAdminCache[userId];
       } catch (e) {
         console.error(e);
-        name = "不明なユーザー";
+        cached = { name: "不明なユーザー", isAdmin: false, imageUrl: "" };
       }
     }
 
     const p = document.createElement("p");
-    p.textContent = name;
-    if (isAdmin) p.classList.add("admin");
+    p.classList.add("clickable-user");
+    p.style.cursor = "pointer";
+    p.appendChild(createAvatar(cached.name, "small", cached.imageUrl));
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = cached.name;
+    if (cached.isAdmin) nameSpan.classList.add("admin");
+    p.appendChild(nameSpan);
+
     p.addEventListener("click", () => {
       openProfileModal(userId);
     });
+
     fragment.appendChild(p);
   }
 

@@ -4,6 +4,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="theme-color" content="#007AB7">
 
   <title>高校見学</title>
   <meta name="apple-mobile-web-app-capable" content="yes"> 
@@ -25,9 +26,10 @@
 </head>
   
 <body>
-  <div id="loading-overlay" class="hidden"> <!-- class="hidde" から修正 -->
+  <div id="loading-overlay">
     <h1>loading...</h1>
-    <p>システムの読み込みに時間がかかる場合があります｡</p>
+    <p id="loading-overlay-text">システムの読み込みに時間がかかる場合があります｡</p>
+    <button id="loading-overlay-skip-button" class="hidden">あとで読み込む</button>
   </div>
   <div id="no-active-overlay" class="hidden">
     <p>アカウントが停止されています</p>
@@ -81,19 +83,18 @@
         <span id="profile-modal-close" class="close-button">&times;</span>
       </div>
       <div id="profile-area">
-        <!-- 名前表示/入力エリア -->
-        <!-- 通常表示用 -->
+        <div class="profile-avatar-wrap">
+          <div id="profile-avatar-holder"></div>
+          <input type="file" id="profile-avatar-input" accept="image/*" class="visually-hidden-input">
+          <button id="profile-avatar-remove-button" class="hidden">画像を削除</button>
+        </div>
+
         <p id="profile-name">取得中...</p>
-        <!-- ★【追加】編集用インプット（JSの profileNameInput に対応） -->
         <input id="profile-name-input" class="hidden" type="text" placeholder="ユーザーネーム">
-        
+
         <p class="profile-label">ステータスメッセージ</p>
-        <!-- ステータスメッセージ表示/入力エリア -->
-        <!-- 通常表示用 -->
         <div id="profile-text">取得中...</div>
-        <!-- 編集用 -->
         <textarea id="profile-text-edit" class="hidden" placeholder="自己紹介を入力してください"></textarea>
-        <!-- プロフィール編集・保存ボタン -->
         <button id="profile-edit-button" class="hidden">プロフィールを編集</button>
       </div>
     </div>
@@ -109,6 +110,7 @@
     </div>
   </div>
 
+  <!-- 画像送信モーダル -->
   <div id="image-upload-modal" class="modal-overlay hidden">
     <div class="modal-content">
       <div class="modal-header">
@@ -116,14 +118,13 @@
         <span id="image-modal-close" class="close-button">&times;</span>
       </div>
 
-      <input type="file" id="modal-image-input" accept="image/*" class="hidden" />
+      <input type="file" id="modal-image-input" accept="image/*" class="visually-hidden-input" />
       <button id="select-image-button" class="normal-button">画像を選択する</button>
 
       <div id="image-preview-container" class="image-preview-container hidden">
         <img id="image-preview" src="" alt="プレビュー">
       </div>
-      <textarea id="image-message-input" rows="5"></textarea>
-      <!--<p id="upload-status-text" class="hidden">アップロード中...</p>-->
+      <textarea id="image-message-input" rows="3" placeholder="メッセージを添える（任意）"></textarea>
       <button id="submit-image-button" class="normal-button" disabled>画像を送信</button>
     </div>
   </div>
@@ -168,13 +169,12 @@
         <p class="title">現在のユーザー</p>
         <p>ID: <strong id="drawerUserId">取得中...</strong><span></span></p>
         <p>ユーザーネーム: <strong id="drawerUsername">取得中...</strong></p>
-        
-        <!-- プロフィール直接編集ボタン -->
+
         <button id="drawer-edit-profile-button" class="normal-button" style="margin-bottom: 1rem;">プロフィールを編集</button>
         <button id="logout-button" class="logout-button normal-button">ログアウト</button>
       </div>
     </div>
-  </div> <!-- ★【修正】閉じタグの漏れを補完しました -->
+  </div>
   
   
   <header id="app-header">
@@ -198,14 +198,23 @@
         <p id="member-button">メンバー</p>
       </div>
       <p id="talk-loading" class="hidden">loading...</p>
-      <div id="talk-area" class="hidde selection"> <!-- class="hidde" から修正 -->
+      <div id="talk-area" class="selection">
         <p>loading...</p>
       </div>
 
+      <button id="back-to-original-button" class="hidden">↓ 元のメッセージにもどる</button>
+
+      <div id="reply-preview-bar" class="hidden">
+        <p id="reply-preview-text"></p>
+        <span id="reply-preview-cancel" class="close-button">&times;</span>
+      </div>
+
       <div id="message-add-area">
-        <button id="open-image-modal-button">画像</button>
-        <button id="open-poll-modal-button">質問</button>
-        <textarea id="message-input" rows="5"></textarea>
+        <div class="message-add-actions">
+          <button id="open-image-modal-button" title="画像を送信">画像</button>
+          <button id="open-poll-modal-button" title="アンケートを作成">質問</button>
+        </div>
+        <textarea id="message-input" rows="5" placeholder="メッセージを入力"></textarea>
         <button id="message-add-button" disabled>送信</button>
       </div>
       
@@ -213,5 +222,5 @@
   </main>
   
   <script type="module" src="talkScript.js"></script>
-</body> <!-- ★【修正】bodyの閉じタグを追加 -->
+</body>
 </html>
