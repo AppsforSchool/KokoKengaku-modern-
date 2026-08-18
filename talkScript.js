@@ -380,6 +380,12 @@ function hideLoadingOverlayNow() {
   if (selectionContainer) {
     selectionContainer.classList.remove("hidden");
   }
+  // ★ 非表示（display:none）の間は scrollTop の指定が効かないため、
+  //   表示された直後に改めて一番下までスクロールし直す
+  const talkAreaEl = document.getElementById("talk-area");
+  if (talkAreaEl) {
+    talkAreaEl.scrollTop = talkAreaEl.scrollHeight;
+  }
 }
 
 // ★ 渡された画像要素すべての読み込み（成功／失敗どちらでも）を待ってからオーバーレイを閉じる。
