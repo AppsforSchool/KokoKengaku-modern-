@@ -45,8 +45,10 @@ let memberSubscribers = [];
 let loadingOverlay;
 let loadingOverlayText;
 let loadingOverlaySkipButton;
+let selectionContainer; // ★ トーク本体（タイトル・メッセージ一覧など）。読み込み完了までは非表示にしておく
 let noActiveOverlay;
-let isInitialTalkLoad = true; // ★ 初回のトーク表示時のみ画像読み込みを待ってオーバーレイを消す
+let isInitialTalkLoad = true;   // ★ 初回のトーク表示時のみ画像読み込みを待ってオーバーレイを消す
+let initialLoadSkipped = false; // ★「あとで読み込む」が押されたかどうか（押されたら以降の進捗表示・待機は行わない）
 let drawerOverlay;
 let accountSettingsDrawer;
 let drawerCloseButton;
@@ -207,7 +209,14 @@ document.addEventListener("DOMContentLoaded", () => {
   loadingOverlay = document.getElementById("loading-overlay");
   loadingOverlayText = document.getElementById("loading-overlay-text");
   loadingOverlaySkipButton = document.getElementById("loading-overlay-skip-button");
+  selectionContainer = document.getElementById("selection-container");
   noActiveOverlay = document.getElementById("no-active-overlay");
+
+  // ★「あとで読み込む」：いつ押しても即座にオーバーレイを閉じてトークを表示する
+  loadingOverlaySkipButton.addEventListener("click", () => {
+    initialLoadSkipped = true;
+    hideLoadingOverlayNow();
+  });
   
   drawerOverlay = document.getElementById("drawerOverlay");
   accountSettingsDrawer = document.getElementById("accountSettingsDrawer");
@@ -364,14 +373,21 @@ const handleLogout = async () => {
   }
 };
 
-// ★ ローディングオーバーレイを即座に閉じる
+// ★ ローディングオーバーレイを即座に閉じ、裏に隠していたトーク本体を表示する
 function hideLoadingOverlayNow() {
   loadingOverlay.classList.add("hidden");
+  loadingOverlaySkipButton.classList.add("hidden");
+  if (selectionContainer) {
+    selectionContainer.classList.remove("hidden");
+  }
 }
 
 // ★ 渡された画像要素すべての読み込み（成功／失敗どちらでも）を待ってからオーバーレイを閉じる。
-//   読み込み中は「画像を読み込んでいます (n/m)」を表示し、「あとで読み込む」ボタンで即座にスキップできる。
+//   読み込み中は「画像を読み込んでいます (n/m)」を表示する。
+//   「あとで読み込む」が既に押されていれば何もしない（既にオーバーレイは閉じている）。
 async function waitForImagesThenHideOverlay(images) {
+  if (initialLoadSkipped) return;
+
   if (!images || images.length === 0) {
     hideLoadingOverlayNow();
     return;
@@ -379,23 +395,15 @@ async function waitForImagesThenHideOverlay(images) {
 
   const total = images.length;
   let loadedCount = 0;
-  let skipped = false;
 
-  const defaultOverlayText = "システムの読み込みに時間がかかる場合があります｡";
   loadingOverlayText.textContent = `画像を読み込んでいます (0/${total})`;
   loadingOverlaySkipButton.classList.remove("hidden");
-
-  const handleSkip = () => {
-    skipped = true;
-    hideLoadingOverlayNow();
-  };
-  loadingOverlaySkipButton.addEventListener("click", handleSkip, { once: true });
 
   await Promise.all(images.map((img) => {
     return new Promise((resolve) => {
       const onDone = () => {
         loadedCount++;
-        if (!skipped) {
+        if (!initialLoadSkipped) {
           loadingOverlayText.textContent = `画像を読み込んでいます (${loadedCount}/${total})`;
         }
         resolve();
@@ -410,11 +418,7 @@ async function waitForImagesThenHideOverlay(images) {
     });
   }));
 
-  loadingOverlaySkipButton.removeEventListener("click", handleSkip);
-  loadingOverlaySkipButton.classList.add("hidden");
-  loadingOverlayText.textContent = defaultOverlayText;
-
-  if (!skipped) {
+  if (!initialLoadSkipped) {
     hideLoadingOverlayNow();
   }
 }
@@ -438,6 +442,13 @@ async function getAllTalkData(talkId) {
       .collection("talk")
       .orderBy("time", "asc")
       .onSnapshot(async (messageSnapshot) => {
+        // ★ このスナップショットが「初回のトーク表示」かどうかを固定しておく
+        //   （isInitialTalkLoad はこの後すぐ false にするため、判定結果をローカルに保持する）
+        const isThisInitialLoad = isInitialTalkLoad;
+        if (isThisInitialLoad) {
+          isInitialTalkLoad = false;
+        }
+
         const newTalk = document.createElement("div");
         const loadingText = document.createElement("p");
         loadingText.textContent = "loading...";
@@ -454,8 +465,18 @@ async function getAllTalkData(talkId) {
         // ★ このスナップショットで表示するメッセージ内の画像要素を集めておく（初回表示時の読み込み待ちに使う）
         const imagesInThisRender = [];
 
+        const totalDocs = messageSnapshot.docs.length;
+        let processedDocs = 0;
+
         for (const talkDoc of messageSnapshot.docs) {
           const messageData = talkDoc.data();
+
+          // ★ 初回表示時のみ、トークデータの処理進捗（%）をオーバーレイに表示する
+          processedDocs++;
+          if (isThisInitialLoad && !initialLoadSkipped && totalDocs > 0) {
+            const percent = Math.round((processedDocs / totalDocs) * 100);
+            loadingOverlayText.textContent = `トークデータを読み込んでいます (${percent}%)`;
+          }
 
           // ★ isDisplayがfalseのメッセージは表示しない（未設定＝過去のメッセージは表示する）
           if (messageData.isDisplay === false) continue;
@@ -648,9 +669,8 @@ async function getAllTalkData(talkId) {
         updateLastCheckedTime(talkId, myUserId);
 
         // ★ 初回のトーク表示時のみ、画像の読み込みが終わる（またはスキップされる）までオーバーレイを出したままにする
-        if (isInitialTalkLoad) {
-          isInitialTalkLoad = false;
-          waitForImagesThenHideOverlay(imagesInThisRender);
+        if (isThisInitialLoad) {
+          await waitForImagesThenHideOverlay(imagesInThisRender);
         }
       });
     
