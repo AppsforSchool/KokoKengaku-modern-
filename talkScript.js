@@ -29,6 +29,9 @@ function setUserCache(userId, data) {
   return userDataCache[userId];
 }
 let userLastCheckedCache = {}; // ★ 最終確認日時用のキャッシュを追加
+// ★ このセッションを開いた時点での「自分の最終確認日時」。未読区切り線の基準として使うため、
+//   その後 updateLastCheckedTime() で更新されても上書きしない（一度だけ取得して保持する）
+let initialLastCheckedDate = null;
 let currentRoomMembers = [];   // ★ 現在のルームのメンバーIDリストを保持する変数を追加
 
 // ★ 返信機能用の状態
@@ -276,6 +279,12 @@ document.addEventListener("DOMContentLoaded", () => {
           });
 
           talkId = getParmFromUrl("id");
+
+          // ★ 未読区切り線の基準日時を、この後 lastChecked が更新される前に一度だけ取得しておく
+          if (userData.lastChecked && userData.lastChecked[talkId]) {
+            initialLastCheckedDate = userData.lastChecked[talkId].toDate();
+          }
+
           // ★ メンバーのリアルタイム監視・キャッシュ化を開始
           await setupMemberSnapshots(talkId);
 
@@ -373,6 +382,48 @@ const handleLogout = async () => {
   }
 };
 
+// ★ 未読区切り線（「ここから未読」）のDOMを作る
+function buildUnreadDivider() {
+  const divider = document.createElement("div");
+  divider.id = "unread-divider";
+  divider.classList.add("unread-divider");
+
+  const lineLeft = document.createElement("span");
+  lineLeft.classList.add("unread-divider-line");
+
+  const label = document.createElement("span");
+  label.classList.add("unread-divider-label");
+  label.textContent = "ここから未読";
+
+  const lineRight = document.createElement("span");
+  lineRight.classList.add("unread-divider-line");
+
+  divider.appendChild(lineLeft);
+  divider.appendChild(label);
+  divider.appendChild(lineRight);
+  return divider;
+}
+
+// ★ talk-area のスクロール位置を合わせる。
+//   未読区切り線があればそれが一番上に来るように、無ければ一番下（最新メッセージ）に来るようにする。
+//   #selection-container が非表示（display:none）の間はスクロール量を正しく計算できないため、
+//   表示された直後（hideLoadingOverlayNow）にも呼び直す必要がある。
+function scrollTalkAreaToTarget() {
+  const talkAreaEl = document.getElementById("talk-area");
+  if (!talkAreaEl) return;
+
+  const dividerEl = document.getElementById("unread-divider");
+  if (dividerEl) {
+    dividerEl.scrollIntoView({ block: "start", behavior: "auto" });
+  } else if (initialLastCheckedDate === null) {
+    // ★ 一度もこのトークに入ったことがない（最終確認日時が記録されていない）場合は、
+    //   一番上＝最初のメッセージまでスクロールする
+    talkAreaEl.scrollTop = 0;
+  } else {
+    talkAreaEl.scrollTop = talkAreaEl.scrollHeight;
+  }
+}
+
 // ★ ローディングオーバーレイを即座に閉じ、裏に隠していたトーク本体を表示する
 function hideLoadingOverlayNow() {
   loadingOverlay.classList.add("hidden");
@@ -380,12 +431,9 @@ function hideLoadingOverlayNow() {
   if (selectionContainer) {
     selectionContainer.classList.remove("hidden");
   }
-  // ★ 非表示（display:none）の間は scrollTop の指定が効かないため、
-  //   表示された直後に改めて一番下までスクロールし直す
-  const talkAreaEl = document.getElementById("talk-area");
-  if (talkAreaEl) {
-    talkAreaEl.scrollTop = talkAreaEl.scrollHeight;
-  }
+  // ★ 非表示（display:none）の間はスクロール位置の指定が効かないため、
+  //   表示された直後に改めてスクロール位置を合わせ直す
+  scrollTalkAreaToTarget();
 }
 
 // ★ 渡された画像要素すべての読み込み（成功／失敗どちらでも）を待ってからオーバーレイを閉じる。
@@ -471,6 +519,9 @@ async function getAllTalkData(talkId) {
         // ★ このスナップショットで表示するメッセージ内の画像要素を集めておく（初回表示時の読み込み待ちに使う）
         const imagesInThisRender = [];
 
+        // ★ 未読区切り線はこのレンダリング内で最大1本だけ挿入する
+        let unreadDividerInserted = false;
+
         const totalDocs = messageSnapshot.docs.length;
         let processedDocs = 0;
 
@@ -486,6 +537,15 @@ async function getAllTalkData(talkId) {
 
           // ★ isDisplayがfalseのメッセージは表示しない（未設定＝過去のメッセージは表示する）
           if (messageData.isDisplay === false) continue;
+
+          // ★ 自分の最終確認日時より後のメッセージが最初に出てくるところに、未読区切り線を挿入する
+          if (!unreadDividerInserted && initialLastCheckedDate && messageData.time) {
+            const messageDate = messageData.time.toDate();
+            if (messageDate > initialLastCheckedDate) {
+              newTalk.appendChild(buildUnreadDivider());
+              unreadDividerInserted = true;
+            }
+          }
 
           const message = document.createElement("div");
           message.id = "msg-" + talkDoc.id; // ★ 返信ジャンプ先として参照するためのID
@@ -670,7 +730,14 @@ async function getAllTalkData(talkId) {
         }
         talkArea.innerHTML = "";
         talkArea.appendChild(newTalk);
-        talkArea.scrollTop = talkArea.scrollHeight;
+
+        // ★ 初回表示時は「未読区切り線」があればそれを一番上に、無ければ一番下にスクロール。
+        //   2回目以降（新着メッセージ受信時など）は、これまで通り一番下にスクロールする。
+        if (isThisInitialLoad) {
+          scrollTalkAreaToTarget();
+        } else {
+          talkArea.scrollTop = talkArea.scrollHeight;
+        }
 
         updateLastCheckedTime(talkId, myUserId);
 
