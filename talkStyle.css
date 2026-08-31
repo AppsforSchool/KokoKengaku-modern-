@@ -545,9 +545,35 @@ a {
   color: transparent;
   animation: wave 2s linear infinite;
 }
+/* ★ 景品（イベント等で一定期間もらえる演出）：グラデーションは管理者と同一、速度だけ半分（4s）にした変種 */
+#profile-name.prize,
+.member-item.prize .member-name,
+#read-area p .prize,
+#drawerUsername.prize,
+.message .message-user .prize,
+#poll-voters-area p .prize {
+  background: linear-gradient(
+    90deg,
+    #ff5a5a, #ffbc41, #f5f551, #5eff5e, #84a1ff, #ff45ff, #ff5a5a
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: wave 4s linear infinite;
+}
 @keyframes wave {
   0% { background-position: 0% center; }
   100% { background-position: 200% center; }
+}
+/* ★ #profile-name はブロック要素で箱が文字幅より広いため、光らせる時だけ文字幅ぴったりに縮めて
+      グラデーションが全体に薄く伸びてしまう不具合を防ぐ（span/strong等インライン要素には不要） */
+#profile-name.admin,
+#profile-name.prize {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
 }
 
 #profile-name-input {
