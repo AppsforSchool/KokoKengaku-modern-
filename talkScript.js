@@ -303,6 +303,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
           talkId = getParmFromUrl("id");
 
+          // ★ 問題投稿サイト（意見募集）のトークにだけ、サイトへのリンクバナーを表示する
+          const problemPostingBanner = document.getElementById("problem-posting-banner");
+          if (problemPostingBanner) {
+            problemPostingBanner.classList.toggle("hidden", talkId !== "1problemposting");
+          }
+
           // ★ 未読区切り線の基準日時を、この後 lastChecked が更新される前に一度だけ取得しておく
           if (userData.lastChecked && userData.lastChecked[talkId]) {
             initialLastCheckedDate = userData.lastChecked[talkId].toDate();

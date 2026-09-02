@@ -1165,6 +1165,26 @@ img.avatar-circle {
   border-bottom: 1px solid var(--border);
   background-color: var(--surface);
 }
+#problem-posting-banner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.6rem 1.5rem;
+  background-color: var(--primary-light, rgba(0, 122, 183, 0.08));
+  border-bottom: 1px solid var(--border);
+  color: var(--primary);
+  font-weight: 700;
+  font-size: 0.9rem;
+  text-decoration: none;
+  text-align: center;
+}
+#problem-posting-banner:hover {
+  background-color: rgba(0, 122, 183, 0.14);
+}
+#problem-posting-banner.hidden {
+  display: none;
+}
 #talk-title {
   font-weight: 700;
   font-size: 1.05rem;
