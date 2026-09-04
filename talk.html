@@ -75,6 +75,18 @@
     </div>
   </div>
 
+  <!-- 転送先選択モーダル（管理者のみ） -->
+  <div id="forward-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <p class="title">メッセージを転送</p>
+        <span id="forward-modal-close" class="close-button">&times;</span>
+      </div>
+      <p id="forward-modal-loading">読み込み中...</p>
+      <div id="forward-room-list"></div>
+    </div>
+  </div>
+
   <!-- プロフィールモーダル -->
   <div id="profile-modal" class="modal-overlay hidden">
     <div class="modal-content">

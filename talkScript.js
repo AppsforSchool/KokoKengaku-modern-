@@ -507,6 +507,8 @@ async function waitForImagesThenHideOverlay(images) {
   }
 }
 
+let currentRoomTitle = ""; // ★ 転送機能で「元のルーム名」として使うため保持しておく
+
 async function getAllTalkData(talkId) {
   const talkTitle = document.getElementById("talk-title");
   const talkArea = document.getElementById("talk-area");
@@ -515,6 +517,7 @@ async function getAllTalkData(talkId) {
     const roomSnapshot = await db.collection("KokoKengaku").doc(talkId).get();
     const roomData = roomSnapshot.data();
     talkTitle.textContent = roomData.title;
+    currentRoomTitle = roomData.title || "";
 
     db.collection("users_random").doc(myUserId).update({
       [`unreadCounts.${talkId}`]: 0
@@ -665,6 +668,15 @@ async function getAllTalkData(talkId) {
             openEditModal(talkDoc.id, messageData.userId, messageData.message);
           });
 
+          // ★ 転送（管理者のみ）
+          const forwardSpan = document.createElement("span");
+          forwardSpan.textContent = `転送`;
+          forwardSpan.style.textDecoration = 'underline';
+          forwardSpan.style.cursor = 'pointer';
+          forwardSpan.addEventListener("click", () => {
+            openForwardModal(talkDoc);
+          });
+
           // ★ 自分の発言では吹き出しの上に自分の名前を出さない（相手の発言のみ表示）
           if (!isOwnMessage) {
             messageUser.appendChild(senderNameSpan);
@@ -675,11 +687,20 @@ async function getAllTalkData(talkId) {
             messageUser.appendChild(document.createTextNode(" "));
             messageUser.appendChild(editSpan);
           }
+          if (meIsAdmin) {
+            messageUser.appendChild(document.createTextNode(" "));
+            messageUser.appendChild(forwardSpan);
+          }
 
           // ★ アバター + 本文をまとめた行を組み立て（自分は右寄せ、相手は左寄せ＋アバター表示）
           const bubbleCol = document.createElement("div");
           bubbleCol.classList.add("bubble-col");
           bubbleCol.appendChild(messageUser);
+
+          // ★ このメッセージが別のルームから転送されたものなら、ラベルを表示する
+          if (messageData.forwardedFrom) {
+            bubbleCol.appendChild(buildForwardedLabel(messageData.forwardedFrom));
+          }
 
           // ★ 表示順：送信者・日付など → 返信元のメッセージ → 今回のメッセージ
           if (messageData.replyTo) {
@@ -1301,6 +1322,133 @@ async function messageDelete(messageId) {
     alert(error);
     console.error(error);
   }
+}
+
+// ================================
+// ★ メッセージ転送機能（管理者のみ）
+// ================================
+
+let forwardModal;
+let forwardModalClose;
+let forwardModalLoading;
+let forwardRoomList;
+let pendingForwardContent = null; // ★ 転送先が選ばれるまで、転送するメッセージの内容を一時保持する
+
+document.addEventListener("DOMContentLoaded", () => {
+  forwardModal = document.getElementById("forward-modal");
+  forwardModalClose = document.getElementById("forward-modal-close");
+  forwardModalLoading = document.getElementById("forward-modal-loading");
+  forwardRoomList = document.getElementById("forward-room-list");
+
+  forwardModalClose.addEventListener("click", () => {
+    forwardModal.classList.add("hidden");
+  });
+});
+
+// ★ 転送ボタンから呼ばれる：転送するメッセージの内容を保持しつつ、転送先ルームの一覧を表示する
+async function openForwardModal(messageDoc) {
+  const messageData = messageDoc.data();
+
+  // ★ 転送する内容だけを抜き出しておく（既読・返信先・変更履歴などは引き継がない）
+  const senderCached = getUserCache(messageData.userId) || {};
+  pendingForwardContent = {
+    message: messageData.message || "",
+    imageUrl: messageData.imageUrl || null,
+    choices: Array.isArray(messageData.choices) ? messageData.choices : null,
+    forwardedFrom: {
+      senderName: senderCached.name || "不明なユーザー",
+      roomTitle: currentRoomTitle || "元のトーク"
+    }
+  };
+
+  forwardModal.classList.remove("hidden");
+  forwardRoomList.innerHTML = "";
+  forwardModalLoading.classList.remove("hidden");
+
+  try {
+    const roomsSnapshot = await db.collection("KokoKengaku").get();
+
+    forwardModalLoading.classList.add("hidden");
+    forwardRoomList.innerHTML = "";
+
+    const otherRooms = roomsSnapshot.docs.filter((doc) => doc.id !== talkId);
+
+    if (otherRooms.length === 0) {
+      const emptyText = document.createElement("p");
+      emptyText.textContent = "転送できるトークルームがありません。";
+      forwardRoomList.appendChild(emptyText);
+      return;
+    }
+
+    otherRooms.forEach((roomDoc) => {
+      const roomData = roomDoc.data();
+
+      const roomItem = document.createElement("div");
+      roomItem.classList.add("forward-room-item");
+      roomItem.textContent = roomData.title || "（無題のルーム）";
+      roomItem.addEventListener("click", () => {
+        forwardMessageToRoom(roomDoc.id, roomItem);
+      });
+
+      forwardRoomList.appendChild(roomItem);
+    });
+  } catch (error) {
+    forwardModalLoading.classList.add("hidden");
+    console.error("転送先ルーム一覧の取得エラー:", error);
+    alert("転送先ルームの取得に失敗しました。\n" + error.message);
+  }
+}
+
+// ★ 選ばれたルームへ、保持しておいた内容を新しいメッセージとして書き込む
+async function forwardMessageToRoom(targetRoomId, roomItemEl) {
+  if (!pendingForwardContent) return;
+
+  // ★ 二重送信防止（クリック直後にリスト全体を操作不能にする）
+  const allItems = forwardRoomList.querySelectorAll(".forward-room-item");
+  allItems.forEach((el) => (el.style.pointerEvents = "none"));
+  if (roomItemEl) roomItemEl.textContent += "（転送中...）";
+
+  try {
+    const newMessageDoc = {
+      userId: myUserId,
+      message: pendingForwardContent.message,
+      readBy: [],
+      replyTo: null,
+      forwardedFrom: pendingForwardContent.forwardedFrom,
+      time: firebase.firestore.FieldValue.serverTimestamp()
+    };
+
+    if (pendingForwardContent.imageUrl) {
+      newMessageDoc.imageUrl = pendingForwardContent.imageUrl;
+    }
+    // ★ アンケートの場合は選択肢だけ引き継ぎ、回答（answer）はリセットして新しく送る
+    if (pendingForwardContent.choices) {
+      newMessageDoc.choices = pendingForwardContent.choices;
+      newMessageDoc.answer = {};
+    }
+
+    await db.collection("KokoKengaku").doc(targetRoomId).collection("talk").add(newMessageDoc);
+    await db.collection("KokoKengaku").doc(targetRoomId).update({
+      lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    pendingForwardContent = null;
+    forwardModal.classList.add("hidden");
+    alert("転送しました。");
+  } catch (error) {
+    console.error("メッセージ転送エラー:", error);
+    alert("転送に失敗しました。\n" + error.message);
+    allItems.forEach((el) => (el.style.pointerEvents = ""));
+    if (roomItemEl) roomItemEl.textContent = roomItemEl.textContent.replace("（転送中...）", "");
+  }
+}
+
+// ★ 転送されたメッセージの吹き出しに出す「〇〇より転送」ラベル
+function buildForwardedLabel(forwardedFrom) {
+  const label = document.createElement("p");
+  label.classList.add("forwarded-label");
+  label.textContent = `↪ 転送: ${forwardedFrom.senderName}（${forwardedFrom.roomTitle}より）`;
+  return label;
 }
 
 let profileModal;
