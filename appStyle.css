@@ -533,6 +533,21 @@ div, p {
 }
 
 /* --- トークルーム一覧（1件ずつのカード行） --- */
+.talk-group-header {
+  width: 100%;
+  max-width: 560px;
+  box-sizing: border-box;
+  margin: 0.75rem auto 0;
+  padding: 0 0.3rem;
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  letter-spacing: 0.04em;
+  text-align: left;
+}
+.talk-group-header:first-child {
+  margin-top: 0;
+}
 .talk-button {
   display: flex;
   border-radius: var(--radius-md);

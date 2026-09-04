@@ -313,13 +313,55 @@ function getTalkButtonUpdatedAtMillis(talkButton) {
   return ts && typeof ts.toMillis === "function" ? ts.toMillis() : 0;
 }
 
-// ★ トーク一覧を「最終更新日時が新しいもの→古いもの」の順に並べ直す
+// ★ 更新日時（ミリ秒）から「今日」「昨日」などのグループ名を決める
+const TALK_GROUP_ORDER = ["今日", "昨日", "1週間前", "1ヶ月前", "それ以前"];
+function getDateGroupLabel(millis) {
+  if (!millis) return "それ以前";
+
+  const now = new Date();
+  const target = new Date(millis);
+
+  // ★ 時刻を無視して「日」単位の差で判定する
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const startOfTarget = new Date(target.getFullYear(), target.getMonth(), target.getDate());
+  const daysAgo = Math.round((startOfToday - startOfTarget) / (1000 * 60 * 60 * 24));
+
+  if (daysAgo <= 0) return "今日";
+  if (daysAgo === 1) return "昨日";
+  if (daysAgo <= 6) return "1週間前";
+  if (daysAgo <= 29) return "1ヶ月前";
+  return "それ以前";
+}
+
+// ★ トーク一覧を「最終更新日時が新しいもの→古いもの」の順に並べ替えつつ、
+//   「今日」「昨日」「1週間前」...のグループ見出しを挿入し直す
 //   （既存のボタン要素を再アペンドするだけなので、イベントや未読表示はそのまま引き継がれる）
-function reorderTalkButtons(talkButtonArea) {
+function regroupTalkButtons(talkButtonArea) {
   const buttons = Array.from(talkButtonArea.querySelectorAll(".talk-button"));
-  // ★ 最終更新日時が新しいものほど上に来るよう、降順（大きい→小さい）で並べる
-  buttons.sort((a, b) => getTalkButtonUpdatedAtMillis(b) - getTalkButtonUpdatedAtMillis(a));
-  buttons.forEach((button) => talkButtonArea.appendChild(button));
+
+  // ★ グループの並び順を優先し、グループ内は更新日時が新しい順にする
+  buttons.sort((a, b) => {
+    const groupIndexA = TALK_GROUP_ORDER.indexOf(getDateGroupLabel(getTalkButtonUpdatedAtMillis(a)));
+    const groupIndexB = TALK_GROUP_ORDER.indexOf(getDateGroupLabel(getTalkButtonUpdatedAtMillis(b)));
+    if (groupIndexA !== groupIndexB) return groupIndexA - groupIndexB;
+    return getTalkButtonUpdatedAtMillis(b) - getTalkButtonUpdatedAtMillis(a);
+  });
+
+  // ★ 見出しはいったん全部外して、必要な分だけ作り直す（見出し自体には状態を持たせていないので安全）
+  talkButtonArea.querySelectorAll(".talk-group-header").forEach((header) => header.remove());
+
+  let currentGroupLabel = null;
+  buttons.forEach((button) => {
+    const groupLabel = getDateGroupLabel(getTalkButtonUpdatedAtMillis(button));
+    if (groupLabel !== currentGroupLabel) {
+      const header = document.createElement("p");
+      header.classList.add("talk-group-header");
+      header.textContent = groupLabel;
+      talkButtonArea.appendChild(header);
+      currentGroupLabel = groupLabel;
+    }
+    talkButtonArea.appendChild(button);
+  });
 }
 
 function getAllTalkData() {
@@ -378,8 +420,8 @@ function getAllTalkData() {
             talkButton.appendChild(newMessageArea);
             talkButtonArea.appendChild(talkButton); // 画面に直接追加
 
-            // ★ 追加した直後に、更新日時が早い順になるよう並び替える
-            reorderTalkButtons(talkButtonArea);
+            // ★ 追加した直後に、グループ見出しつきで並び替える
+            regroupTalkButtons(talkButtonArea);
 
             // この部屋の未読数を計算して書き換える
             updateSingleRoomUnread(roomId, lastCheckedMap[roomId]);
@@ -393,9 +435,9 @@ function getAllTalkData() {
               const titleArea = talkButton.querySelector(".title");
               if (titleArea) titleArea.textContent = roomData.title;
 
-              // ★ 更新日時を最新化して、並び順に反映させる
+              // ★ 更新日時を最新化して、グループ・並び順に反映させる
               talkButton.dataUpdatedAt = roomData.lastUpdatedAt;
-              reorderTalkButtons(talkButtonArea);
+              regroupTalkButtons(talkButtonArea);
 
               // ★ ここがポイント：未読数だけをピンポイントで数え直して更新する
               updateSingleRoomUnread(roomId, lastCheckedMap[roomId]);
@@ -406,6 +448,8 @@ function getAllTalkData() {
           if (change.type === "removed") {
             const talkButton = document.getElementById(`room-${roomId}`);
             if (talkButton) talkButton.remove();
+            // ★ 削除後、空になったグループの見出しが残らないよう整理し直す
+            regroupTalkButtons(talkButtonArea);
           }
         });
 
