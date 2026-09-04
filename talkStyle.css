@@ -467,6 +467,32 @@ a {
   box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.15);
   outline: none;
 }
+#new-message-time-label {
+  text-align: left;
+}
+#new-message-time-input {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-weight: 700;
+  font-size: 0.95rem;
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  margin: 0.4rem 0 10px 0;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-alt);
+  box-sizing: border-box;
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease), background-color 0.2s var(--ease);
+}
+#new-message-time-input:focus {
+  border-color: var(--primary);
+  background-color: var(--surface);
+  box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.15);
+  outline: none;
+}
+#new-message-time-label.hidden,
+#new-message-time-input.hidden {
+  display: none;
+}
 
 /* --- プロフィールモーダル --- */
 #profile-area {

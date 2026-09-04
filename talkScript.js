@@ -662,7 +662,7 @@ async function getAllTalkData(talkId) {
           editSpan.style.textDecoration = 'underline';
           editSpan.style.cursor = 'pointer';
           editSpan.addEventListener("click", () => {
-            openEditModal(talkDoc.id, messageData.userId, messageData.message);
+            openEditModal(talkDoc.id, messageData.userId, messageData.message, messageData.time);
           });
 
           // ★ 転送（管理者のみ）
@@ -1247,12 +1247,14 @@ async function openReadByModal(readByList) {
 let messageId;
 let editModal;
 let editModalClose;
-let newUserIdInput, newMessageInput, newMessageChangeButton, messageDeleteButton;
+let newUserIdInput, newMessageInput, newMessageTimeLabel, newMessageTimeInput, newMessageChangeButton, messageDeleteButton;
 document.addEventListener("DOMContentLoaded", () => {
   editModal = document.getElementById("edit-modal");
   editModalClose = document.getElementById("edit-modal-close");
   newUserIdInput = document.getElementById("new-userId-input");
   newMessageInput = document.getElementById("new-message-input");
+  newMessageTimeLabel = document.getElementById("new-message-time-label");
+  newMessageTimeInput = document.getElementById("new-message-time-input");
   newMessageChangeButton = document.getElementById("new-message-change-button");
   messageDeleteButton = document.getElementById("message-delete-button");
   
@@ -1266,7 +1268,9 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   newMessageChangeButton.addEventListener("click", async () => {
-    await newMessageChange(messageId, newUserIdInput.value, newMessageInput.value);
+    // ★ 送信時刻の変更は管理者のみ反映する
+    const newTimeValue = meIsAdmin ? newMessageTimeInput.value : null;
+    await newMessageChange(messageId, newUserIdInput.value, newMessageInput.value, newTimeValue);
   });
 
   messageDeleteButton.addEventListener("click", async () => {
@@ -1281,7 +1285,18 @@ function updateMessageChangeButtonState() {
   newMessageChangeButton.disabled = !hasMessage;
 }
 
-function openEditModal(thisMessageId, messageUserId, messageText) {
+// ★ Firestoreのタイムスタンプを、<input type="datetime-local"> 用のローカル日時文字列(YYYY-MM-DDTHH:mm)に変換する
+function timestampToDatetimeLocalValue(timestamp) {
+  const date = timestamp && typeof timestamp.toDate === "function" ? timestamp.toDate() : new Date();
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}T${hh}:${min}`;
+}
+
+function openEditModal(thisMessageId, messageUserId, messageText, messageTime) {
   messageId = thisMessageId;
   newUserIdInput.value = messageUserId;
   newMessageInput.value = messageText;
@@ -1289,13 +1304,19 @@ function openEditModal(thisMessageId, messageUserId, messageText) {
   // ★ 送信者IDの変更は引き続き管理者限定。削除は誰でも（自分の発言・管理者は他人の発言も）可能にする
   newUserIdInput.disabled = !meIsAdmin;
   messageDeleteButton.disabled = false;
+
+  // ★ 送信時刻の編集は管理者のみ（一般ユーザーには欄自体を見せない）
+  newMessageTimeLabel.classList.toggle("hidden", !meIsAdmin);
+  newMessageTimeInput.classList.toggle("hidden", !meIsAdmin);
+  newMessageTimeInput.value = timestampToDatetimeLocalValue(messageTime);
+
   updateMessageChangeButtonState();
 
   editModal.classList.remove("hidden");
   
 }
 
-async function newMessageChange(messageId, newUserId, newMessage) {
+async function newMessageChange(messageId, newUserId, newMessage, newTimeValue) {
   try {
     const docRef = db.collection("KokoKengaku")
       .doc(talkId)
@@ -1311,11 +1332,21 @@ async function newMessageChange(messageId, newUserId, newMessage) {
       ? [...existingChangeLog, previousMessage]
       : existingChangeLog;
 
-    await docRef.update({
+    const updateData = {
       userId: newUserId,
       message: newMessage,
       changeLog: updatedChangeLog
-    });
+    };
+
+    // ★ 管理者が送信日時を入力していれば、それを新しい time として反映する
+    if (meIsAdmin && newTimeValue) {
+      const parsedDate = new Date(newTimeValue);
+      if (!isNaN(parsedDate.getTime())) {
+        updateData.time = firebase.firestore.Timestamp.fromDate(parsedDate);
+      }
+    }
+
+    await docRef.update(updateData);
     alert("変更しました。");
   }
   catch (error) {
