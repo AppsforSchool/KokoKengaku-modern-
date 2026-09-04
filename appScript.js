@@ -307,6 +307,21 @@ async function openProfileModal(userId, startEditMode = false) {
 // リアルタイム更新の監視を解除するための関数を保持する変数
 let talkListenerUnsubscribe = null;
 
+// ★ 更新日時を比較しやすいミリ秒数値に変換する（未設定のルームは一番古い扱いにする）
+function getTalkButtonUpdatedAtMillis(talkButton) {
+  const ts = talkButton.dataUpdatedAt;
+  return ts && typeof ts.toMillis === "function" ? ts.toMillis() : 0;
+}
+
+// ★ トーク一覧を「最終更新日時が新しいもの→古いもの」の順に並べ直す
+//   （既存のボタン要素を再アペンドするだけなので、イベントや未読表示はそのまま引き継がれる）
+function reorderTalkButtons(talkButtonArea) {
+  const buttons = Array.from(talkButtonArea.querySelectorAll(".talk-button"));
+  // ★ 最終更新日時が新しいものほど上に来るよう、降順（大きい→小さい）で並べる
+  buttons.sort((a, b) => getTalkButtonUpdatedAtMillis(b) - getTalkButtonUpdatedAtMillis(a));
+  buttons.forEach((button) => talkButtonArea.appendChild(button));
+}
+
 function getAllTalkData() {
   const talkButtonArea = document.getElementById("talk-button-area");
   const talkButtonLoading = document.getElementById("talk-button-loading");
@@ -363,6 +378,9 @@ function getAllTalkData() {
             talkButton.appendChild(newMessageArea);
             talkButtonArea.appendChild(talkButton); // 画面に直接追加
 
+            // ★ 追加した直後に、更新日時が早い順になるよう並び替える
+            reorderTalkButtons(talkButtonArea);
+
             // この部屋の未読数を計算して書き換える
             updateSingleRoomUnread(roomId, lastCheckedMap[roomId]);
           }
@@ -374,6 +392,10 @@ function getAllTalkData() {
               // タイトルが変わっていれば更新（必要なければ消してもOKです）
               const titleArea = talkButton.querySelector(".title");
               if (titleArea) titleArea.textContent = roomData.title;
+
+              // ★ 更新日時を最新化して、並び順に反映させる
+              talkButton.dataUpdatedAt = roomData.lastUpdatedAt;
+              reorderTalkButtons(talkButtonArea);
 
               // ★ ここがポイント：未読数だけをピンポイントで数え直して更新する
               updateSingleRoomUnread(roomId, lastCheckedMap[roomId]);
