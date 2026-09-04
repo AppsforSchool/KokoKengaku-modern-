@@ -98,7 +98,13 @@ document.addEventListener("DOMContentLoaded", () => {
         if (meIsAdmin) drawerUsername.classList.add("admin");
         myUid = userData.uid;
         loadingOverlay.classList.add("hidden");
-        
+
+        // ★「新しいトークを作成」ボタンは管理者にだけ見せる
+        const openCreateTalkModalButton = document.getElementById("open-create-talk-modal-button");
+        if (openCreateTalkModalButton) {
+          openCreateTalkModalButton.classList.toggle("hidden", !meIsAdmin);
+        }
+
         getAllTalkData();
       } else {
         loadingOverlay.classList.add("hidden");
@@ -440,3 +446,155 @@ document.addEventListener("DOMContentLoaded", () => {
     shareModal.classList.add("hidden");
   });
 });
+
+// ================================
+// ★ 新しいトークの作成（管理者のみ）
+// ================================
+
+let openCreateTalkModalButton;
+let createTalkModal;
+let createTalkModalClose;
+let createTalkTitleInput;
+let createTalkMemberSearch;
+let createTalkMemberLoading;
+let createTalkMemberList;
+let createTalkSubmitButton;
+
+let allUsersCache = null; // ★ メンバー選択用の全ユーザー一覧（一度取得したら使い回す）
+
+document.addEventListener("DOMContentLoaded", () => {
+  openCreateTalkModalButton = document.getElementById("open-create-talk-modal-button");
+  createTalkModal = document.getElementById("create-talk-modal");
+  createTalkModalClose = document.getElementById("create-talk-modal-close");
+  createTalkTitleInput = document.getElementById("create-talk-title-input");
+  createTalkMemberSearch = document.getElementById("create-talk-member-search");
+  createTalkMemberLoading = document.getElementById("create-talk-member-loading");
+  createTalkMemberList = document.getElementById("create-talk-member-list");
+  createTalkSubmitButton = document.getElementById("create-talk-submit-button");
+
+  openCreateTalkModalButton.addEventListener("click", openCreateTalkModal);
+
+  createTalkModalClose.addEventListener("click", () => {
+    createTalkModal.classList.add("hidden");
+  });
+
+  createTalkTitleInput.addEventListener("input", updateCreateTalkSubmitState);
+
+  createTalkMemberSearch.addEventListener("input", () => {
+    renderCreateTalkMemberList(createTalkMemberSearch.value.trim());
+  });
+
+  createTalkSubmitButton.addEventListener("click", handleCreateTalk);
+});
+
+// ★「＋ 新しいトークを作成」ボタンから呼ばれる：モーダルを開いてユーザー一覧を読み込む
+async function openCreateTalkModal() {
+  createTalkTitleInput.value = "";
+  createTalkMemberSearch.value = "";
+  createTalkModal.classList.remove("hidden");
+  updateCreateTalkSubmitState();
+
+  if (allUsersCache) {
+    renderCreateTalkMemberList("");
+    return;
+  }
+
+  createTalkMemberLoading.classList.remove("hidden");
+  createTalkMemberList.innerHTML = "";
+
+  try {
+    const usersSnapshot = await db.collection("users_random").get();
+    allUsersCache = usersSnapshot.docs
+      .map((doc) => ({ userId: doc.id, name: (doc.data() || {}).name || doc.id }))
+      .filter((u) => u.userId !== myUserId) // ★ 自分は自動的にメンバーへ入るので選択肢からは除く
+      .sort((a, b) => a.name.localeCompare(b.name, "ja"));
+
+    createTalkMemberLoading.classList.add("hidden");
+    renderCreateTalkMemberList("");
+  } catch (error) {
+    createTalkMemberLoading.classList.add("hidden");
+    console.error("ユーザー一覧の取得エラー:", error);
+    alert("ユーザー一覧の取得に失敗しました。\n" + error.message);
+  }
+}
+
+// ★ 検索テキストで絞り込みつつ、チェックボックス付きのユーザー一覧を描画する
+function renderCreateTalkMemberList(filterText) {
+  if (!allUsersCache) return;
+
+  // ★ 再描画前に、これまでのチェック状態を保持しておく（検索しても選択が消えないように）
+  const previouslyChecked = new Set(
+    Array.from(createTalkMemberList.querySelectorAll("input[type=checkbox]:checked")).map((cb) => cb.value)
+  );
+
+  createTalkMemberList.innerHTML = "";
+
+  const lowerFilter = filterText.toLowerCase();
+  const filteredUsers = allUsersCache.filter((u) => u.name.toLowerCase().includes(lowerFilter));
+
+  if (filteredUsers.length === 0) {
+    const emptyText = document.createElement("p");
+    emptyText.textContent = "該当するユーザーがいません。";
+    createTalkMemberList.appendChild(emptyText);
+    return;
+  }
+
+  filteredUsers.forEach((u) => {
+    const label = document.createElement("label");
+    label.classList.add("create-talk-member-item");
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = u.userId;
+    checkbox.checked = previouslyChecked.has(u.userId);
+
+    label.appendChild(checkbox);
+    label.appendChild(createAvatar(u.name, "small"));
+
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = u.name;
+    label.appendChild(nameSpan);
+
+    createTalkMemberList.appendChild(label);
+  });
+}
+
+// ★ タイトルが空でなければ作成ボタンを有効化する
+function updateCreateTalkSubmitState() {
+  const hasTitle = createTalkTitleInput && createTalkTitleInput.value.trim() !== "";
+  createTalkSubmitButton.disabled = !hasTitle;
+}
+
+// ★ 実際にKokoKengakuへ新しいルームを作成する
+async function handleCreateTalk() {
+  const title = createTalkTitleInput.value.trim();
+  if (!title) return;
+
+  const selectedMemberIds = Array.from(
+    createTalkMemberList.querySelectorAll("input[type=checkbox]:checked")
+  ).map((cb) => cb.value);
+
+  // ★ 自分（作成者）は必ずメンバーに含める
+  const members = Array.from(new Set([...selectedMemberIds, myUserId]));
+
+  createTalkSubmitButton.disabled = true;
+  createTalkSubmitButton.textContent = "作成中...";
+
+  try {
+    await db.collection("KokoKengaku").add({
+      title: title,
+      members: members,
+      lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+
+    createTalkModal.classList.add("hidden");
+    createTalkTitleInput.value = "";
+    createTalkMemberSearch.value = "";
+  } catch (error) {
+    console.error("トーク作成エラー:", error);
+    alert("トークの作成に失敗しました。\n" + error.message);
+  } finally {
+    createTalkSubmitButton.textContent = "作成する";
+    updateCreateTalkSubmitState();
+  }
+}

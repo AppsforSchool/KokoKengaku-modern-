@@ -66,6 +66,26 @@
     </div>
   </div>
   
+  <!-- 新しいトーク作成モーダル（管理者のみ） -->
+  <div id="create-talk-modal" class="modal-overlay hidden">
+    <div class="modal-content">
+      <div class="modal-header">
+        <p class="title">新しいトークを作成</p>
+        <span id="create-talk-modal-close" class="close-button">&times;</span>
+      </div>
+
+      <p class="profile-label">タイトル</p>
+      <input id="create-talk-title-input" type="text" placeholder="トークのタイトル">
+
+      <p class="profile-label" style="margin-top: 1rem;">メンバー（自分は自動的に追加されます）</p>
+      <input id="create-talk-member-search" type="text" placeholder="ユーザー名で検索">
+      <p id="create-talk-member-loading">読み込み中...</p>
+      <div id="create-talk-member-list"></div>
+
+      <button id="create-talk-submit-button" class="normal-button" disabled style="margin-top: 1rem;">作成する</button>
+    </div>
+  </div>
+
   <div id="drawerOverlay" class="drawer-overlay"></div>
   <div id="accountSettingsDrawer" class="drawer">
     <div class="drawer-header">
@@ -104,6 +124,8 @@
       <a id="problem-posting-banner" href="https://appsforschool.github.io/ProblemPosting/app.html" target="_blank" rel="noopener noreferrer">
         問題投稿サイトはこちらから →
       </a>
+
+      <button id="open-create-talk-modal-button" class="normal-button hidden">＋ 新しいトークを作成</button>
 
       <p id="talk-button-loading">loading...</p>
       <div id="talk-button-area" class="selection">
