@@ -207,6 +207,7 @@
       <div id="head-area">
         <button id="to-home-button">←ホームへもどる</button>
         <p id="talk-title">loading...</p>
+        <p id="select-mode-button">選択</p>
         <p id="member-button">メンバー</p>
       </div>
       <a id="problem-posting-banner" class="hidden" href="https://appsforschool.github.io/ProblemPosting/app.html" target="_blank" rel="noopener noreferrer">
@@ -218,6 +219,15 @@
       </div>
 
       <button id="back-to-original-button" class="hidden">↓ 元のメッセージにもどる</button>
+
+      <div id="selection-action-bar" class="hidden">
+        <p id="selection-count-text">0件選択中</p>
+        <div class="selection-action-buttons">
+          <button id="selection-forward-button" class="hidden" disabled>まとめて転送</button>
+          <button id="selection-delete-button" disabled>まとめて削除</button>
+          <button id="selection-cancel-button">キャンセル</button>
+        </div>
+      </div>
 
       <div id="reply-preview-bar" class="hidden">
         <p id="reply-preview-text"></p>

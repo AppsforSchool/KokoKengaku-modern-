@@ -507,8 +507,6 @@ async function waitForImagesThenHideOverlay(images) {
   }
 }
 
-let currentRoomTitle = ""; // ★ 転送機能で「元のルーム名」として使うため保持しておく
-
 async function getAllTalkData(talkId) {
   const talkTitle = document.getElementById("talk-title");
   const talkArea = document.getElementById("talk-area");
@@ -517,7 +515,6 @@ async function getAllTalkData(talkId) {
     const roomSnapshot = await db.collection("KokoKengaku").doc(talkId).get();
     const roomData = roomSnapshot.data();
     talkTitle.textContent = roomData.title;
-    currentRoomTitle = roomData.title || "";
 
     db.collection("users_random").doc(myUserId).update({
       [`unreadCounts.${talkId}`]: 0
@@ -674,7 +671,7 @@ async function getAllTalkData(talkId) {
           forwardSpan.style.textDecoration = 'underline';
           forwardSpan.style.cursor = 'pointer';
           forwardSpan.addEventListener("click", () => {
-            openForwardModal(talkDoc);
+            openForwardModal([talkDoc]);
           });
 
           // ★ 自分の発言では吹き出しの上に自分の名前を出さない（相手の発言のみ表示）
@@ -692,15 +689,35 @@ async function getAllTalkData(talkId) {
             messageUser.appendChild(forwardSpan);
           }
 
+          // ★ 一括選択用チェックボックス（削除・転送をまとめて行う機能。選択できる範囲は編集と同じ権限）
+          if (meIsAdmin || messageData.userId === myUserId) {
+            const selectLabel = document.createElement("label");
+            selectLabel.classList.add("message-select-label");
+
+            const selectCheckbox = document.createElement("input");
+            selectCheckbox.type = "checkbox";
+            selectCheckbox.classList.add("message-select-checkbox");
+            selectCheckbox.checked = selectedMessageIds.has(talkDoc.id);
+            selectCheckbox.addEventListener("change", () => {
+              if (selectCheckbox.checked) {
+                selectedMessageIds.add(talkDoc.id);
+              } else {
+                selectedMessageIds.delete(talkDoc.id);
+              }
+              updateSelectionActionBar();
+            });
+
+            selectLabel.appendChild(selectCheckbox);
+            selectLabel.appendChild(document.createTextNode("選択"));
+
+            messageUser.appendChild(document.createTextNode(" "));
+            messageUser.appendChild(selectLabel);
+          }
+
           // ★ アバター + 本文をまとめた行を組み立て（自分は右寄せ、相手は左寄せ＋アバター表示）
           const bubbleCol = document.createElement("div");
           bubbleCol.classList.add("bubble-col");
           bubbleCol.appendChild(messageUser);
-
-          // ★ このメッセージが別のルームから転送されたものなら、ラベルを表示する
-          if (messageData.forwardedFrom) {
-            bubbleCol.appendChild(buildForwardedLabel(messageData.forwardedFrom));
-          }
 
           // ★ 表示順：送信者・日付など → 返信元のメッセージ → 今回のメッセージ
           if (messageData.replyTo) {
@@ -1332,7 +1349,7 @@ let forwardModal;
 let forwardModalClose;
 let forwardModalLoading;
 let forwardRoomList;
-let pendingForwardContent = null; // ★ 転送先が選ばれるまで、転送するメッセージの内容を一時保持する
+let pendingForwardItems = null; // ★ 転送先が選ばれるまで、転送するメッセージの内容（複数可）を一時保持する
 
 document.addEventListener("DOMContentLoaded", () => {
   forwardModal = document.getElementById("forward-modal");
@@ -1345,21 +1362,18 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 });
 
-// ★ 転送ボタンから呼ばれる：転送するメッセージの内容を保持しつつ、転送先ルームの一覧を表示する
-async function openForwardModal(messageDoc) {
-  const messageData = messageDoc.data();
+// ★ 転送ボタンから呼ばれる：転送するメッセージ（1件でも複数でも可）のデータをまるごとコピーして保持しつつ、転送先ルームの一覧を表示する
+async function openForwardModal(messageDocs) {
+  const docsArray = Array.isArray(messageDocs) ? messageDocs : [messageDocs];
 
-  // ★ 転送する内容だけを抜き出しておく（既読・返信先・変更履歴などは引き継がない）
-  const senderCached = getUserCache(messageData.userId) || {};
-  pendingForwardContent = {
-    message: messageData.message || "",
-    imageUrl: messageData.imageUrl || null,
-    choices: Array.isArray(messageData.choices) ? messageData.choices : null,
-    forwardedFrom: {
-      senderName: senderCached.name || "不明なユーザー",
-      roomTitle: currentRoomTitle || "元のトーク"
-    }
-  };
+  // ★ 既読状態・返信先・表示フラグ以外は、送信者や日時も含めてそのままコピーする
+  pendingForwardItems = docsArray.map((doc) => {
+    const copied = Object.assign({}, doc.data());
+    delete copied.readBy;
+    delete copied.replyTo;
+    delete copied.isDisplay;
+    return copied;
+  });
 
   forwardModal.classList.remove("hidden");
   forwardRoomList.innerHTML = "";
@@ -1399,42 +1413,41 @@ async function openForwardModal(messageDoc) {
   }
 }
 
-// ★ 選ばれたルームへ、保持しておいた内容を新しいメッセージとして書き込む
+// ★ 選ばれたルームへ、保持しておいた内容（複数可）をまとめて新しいメッセージとして書き込む
 async function forwardMessageToRoom(targetRoomId, roomItemEl) {
-  if (!pendingForwardContent) return;
+  if (!pendingForwardItems || pendingForwardItems.length === 0) return;
 
   // ★ 二重送信防止（クリック直後にリスト全体を操作不能にする）
   const allItems = forwardRoomList.querySelectorAll(".forward-room-item");
   allItems.forEach((el) => (el.style.pointerEvents = "none"));
   if (roomItemEl) roomItemEl.textContent += "（転送中...）";
 
+  const forwardCount = pendingForwardItems.length;
+
   try {
-    const newMessageDoc = {
-      userId: myUserId,
-      message: pendingForwardContent.message,
-      readBy: [],
-      replyTo: null,
-      forwardedFrom: pendingForwardContent.forwardedFrom,
-      time: firebase.firestore.FieldValue.serverTimestamp()
-    };
+    const batch = db.batch();
+    const targetTalkCollection = db.collection("KokoKengaku").doc(targetRoomId).collection("talk");
 
-    if (pendingForwardContent.imageUrl) {
-      newMessageDoc.imageUrl = pendingForwardContent.imageUrl;
-    }
-    // ★ アンケートの場合は選択肢だけ引き継ぎ、回答（answer）はリセットして新しく送る
-    if (pendingForwardContent.choices) {
-      newMessageDoc.choices = pendingForwardContent.choices;
-      newMessageDoc.answer = {};
-    }
+    pendingForwardItems.forEach((item) => {
+      // ★ コピーしたデータをそのまま書き込む（既読・返信先だけリセット。送信者・日時・本文・画像・アンケート等はそのまま）
+      const newMessageDoc = Object.assign({}, item, {
+        readBy: [],
+        replyTo: null
+      });
 
-    await db.collection("KokoKengaku").doc(targetRoomId).collection("talk").add(newMessageDoc);
-    await db.collection("KokoKengaku").doc(targetRoomId).update({
+      batch.set(targetTalkCollection.doc(), newMessageDoc);
+    });
+
+    batch.update(db.collection("KokoKengaku").doc(targetRoomId), {
       lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
 
-    pendingForwardContent = null;
+    await batch.commit();
+
+    pendingForwardItems = null;
     forwardModal.classList.add("hidden");
-    alert("転送しました。");
+    exitSelectionMode(); // ★ 一括選択から転送した場合は、選択モードも終了しておく
+    alert(forwardCount > 1 ? `${forwardCount}件のメッセージを転送しました。` : "転送しました。");
   } catch (error) {
     console.error("メッセージ転送エラー:", error);
     alert("転送に失敗しました。\n" + error.message);
@@ -1443,12 +1456,121 @@ async function forwardMessageToRoom(targetRoomId, roomItemEl) {
   }
 }
 
-// ★ 転送されたメッセージの吹き出しに出す「〇〇より転送」ラベル
-function buildForwardedLabel(forwardedFrom) {
-  const label = document.createElement("p");
-  label.classList.add("forwarded-label");
-  label.textContent = `↪ 転送: ${forwardedFrom.senderName}（${forwardedFrom.roomTitle}より）`;
-  return label;
+// ================================
+// ★ メッセージの一括選択・一括削除・一括転送
+// ================================
+
+let selectModeButton;
+let talkAreaElForSelection;
+let selectionActionBar;
+let selectionCountText;
+let selectionForwardButton;
+let selectionDeleteButton;
+let selectionCancelButton;
+
+let selectionModeActive = false;
+let selectedMessageIds = new Set(); // ★ 選択中のメッセージID（画面が再描画されても保持する）
+
+document.addEventListener("DOMContentLoaded", () => {
+  selectModeButton = document.getElementById("select-mode-button");
+  talkAreaElForSelection = document.getElementById("talk-area");
+  selectionActionBar = document.getElementById("selection-action-bar");
+  selectionCountText = document.getElementById("selection-count-text");
+  selectionForwardButton = document.getElementById("selection-forward-button");
+  selectionDeleteButton = document.getElementById("selection-delete-button");
+  selectionCancelButton = document.getElementById("selection-cancel-button");
+
+  selectModeButton.addEventListener("click", () => {
+    if (selectionModeActive) {
+      exitSelectionMode();
+    } else {
+      enterSelectionMode();
+    }
+  });
+
+  selectionCancelButton.addEventListener("click", exitSelectionMode);
+  selectionDeleteButton.addEventListener("click", handleBulkDelete);
+  selectionForwardButton.addEventListener("click", handleBulkForward);
+});
+
+function enterSelectionMode() {
+  selectionModeActive = true;
+  talkAreaElForSelection.classList.add("selecting");
+  selectionActionBar.classList.remove("hidden");
+  selectModeButton.textContent = "選択解除";
+  // ★「まとめて転送」は管理者のみ（転送機能自体が管理者限定のため）
+  selectionForwardButton.classList.toggle("hidden", !meIsAdmin);
+  updateSelectionActionBar();
+}
+
+function exitSelectionMode() {
+  selectionModeActive = false;
+  selectedMessageIds.clear();
+  if (talkAreaElForSelection) talkAreaElForSelection.classList.remove("selecting");
+  if (selectionActionBar) selectionActionBar.classList.add("hidden");
+  if (selectModeButton) selectModeButton.textContent = "選択";
+  // ★ チェックボックスの見た目もリセットしておく
+  document.querySelectorAll(".message-select-checkbox").forEach((cb) => {
+    cb.checked = false;
+  });
+}
+
+function updateSelectionActionBar() {
+  const count = selectedMessageIds.size;
+  selectionCountText.textContent = `${count}件選択中`;
+  selectionDeleteButton.disabled = count === 0;
+  selectionForwardButton.disabled = count === 0;
+}
+
+// ★「まとめて削除」：実際にdeleteするのではなく、isDisplayをfalseにして一括非表示化する
+async function handleBulkDelete() {
+  const count = selectedMessageIds.size;
+  if (count === 0) return;
+
+  if (!window.confirm(`選択した${count}件のメッセージを削除します。よろしいですか？`)) return;
+
+  selectionDeleteButton.disabled = true;
+  selectionForwardButton.disabled = true;
+
+  try {
+    const batch = db.batch();
+    selectedMessageIds.forEach((messageId) => {
+      const ref = db.collection("KokoKengaku").doc(talkId).collection("talk").doc(messageId);
+      batch.update(ref, { isDisplay: false });
+    });
+    await batch.commit();
+
+    alert(`${count}件のメッセージを削除しました。`);
+    exitSelectionMode();
+  } catch (error) {
+    console.error("一括削除エラー:", error);
+    alert("削除に失敗しました。\n" + error.message);
+    updateSelectionActionBar();
+  }
+}
+
+// ★「まとめて転送」：選択中のメッセージをまとめて取得し、既存の転送モーダルを開く
+async function handleBulkForward() {
+  if (selectedMessageIds.size === 0) return;
+
+  const targetIds = Array.from(selectedMessageIds);
+
+  try {
+    const docs = await Promise.all(
+      targetIds.map((id) => db.collection("KokoKengaku").doc(talkId).collection("talk").doc(id).get())
+    );
+    const validDocs = docs.filter((doc) => doc.exists);
+
+    if (validDocs.length === 0) {
+      alert("転送できるメッセージがありませんでした。");
+      return;
+    }
+
+    openForwardModal(validDocs);
+  } catch (error) {
+    console.error("転送準備エラー:", error);
+    alert("転送するメッセージの取得に失敗しました。\n" + error.message);
+  }
 }
 
 let profileModal;
