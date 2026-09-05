@@ -16,6 +16,23 @@ let myUid = "";
 let myUserId = "";
 let meIsAdmin = false;
 
+// ★ Firestoreのタイムスタンプ(またはミリ秒数値)を、比較に使いやすいミリ秒数値へ揃える
+function toMillisOrNull(value) {
+  if (!value) return null;
+  if (typeof value.toMillis === "function") return value.toMillis();
+  if (typeof value === "number") return value;
+  return null;
+}
+
+// ★ 景品(名前が虹色に光る演出)の持続時間。「問題投稿」アプリ側の仕様に合わせて10分間
+const PRIZE_DURATION_MS = 10 * 60 * 1000;
+
+// ★ 景品が、付与されてからまだ持続時間内（＝現在も有効）かどうか
+function hasActivePrize(cached) {
+  const grantedAt = cached && cached.prizeGrantedAt;
+  return typeof grantedAt === "number" && grantedAt + PRIZE_DURATION_MS > Date.now();
+}
+
 let loadingOverlay;
 let noActiveOverlay;
 let drawerOverlay;
@@ -95,7 +112,11 @@ document.addEventListener("DOMContentLoaded", () => {
       if (userData.isActive) {
         drawerUsername.textContent = userData.name;
         meIsAdmin = userData.isAdmin;
-        if (meIsAdmin) drawerUsername.classList.add("admin");
+        if (meIsAdmin) {
+          drawerUsername.classList.add("admin");
+        } else if (hasActivePrize({ prizeGrantedAt: toMillisOrNull(userData.prizeGrantedAt) })) {
+          drawerUsername.classList.add("prize");
+        }
         myUid = userData.uid;
         loadingOverlay.classList.add("hidden");
 
