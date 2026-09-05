@@ -26,8 +26,8 @@ function getUserCache(userId) {
 }
 function setUserCache(userId, data) {
   const normalized = Object.assign({}, data);
-  if ("prizeExpiresAt" in normalized) {
-    normalized.prizeExpiresAt = toMillisOrNull(normalized.prizeExpiresAt);
+  if ("prizeGrantedAt" in normalized) {
+    normalized.prizeGrantedAt = toMillisOrNull(normalized.prizeGrantedAt);
   }
   userDataCache[userId] = Object.assign({}, userDataCache[userId] || {}, normalized);
   return userDataCache[userId];
@@ -41,10 +41,13 @@ function toMillisOrNull(value) {
   return null;
 }
 
-// ★ 景品(名前が虹色に光る演出)が、現在も有効期限内かどうか
+// ★ 景品(名前が虹色に光る演出)の持続時間。「問題投稿」アプリ側の仕様に合わせて10分間
+const PRIZE_DURATION_MS = 10 * 60 * 1000;
+
+// ★ 景品が、付与されてからまだ持続時間内（＝現在も有効）かどうか
 function hasActivePrize(cached) {
-  const expiresAt = cached && cached.prizeExpiresAt;
-  return typeof expiresAt === "number" && expiresAt > Date.now();
+  const grantedAt = cached && cached.prizeGrantedAt;
+  return typeof grantedAt === "number" && grantedAt + PRIZE_DURATION_MS > Date.now();
 }
 let userLastCheckedCache = {}; // ★ 最終確認日時用のキャッシュを追加
 // ★ このセッションを開いた時点での「自分の最終確認日時」。未読区切り線の基準として使うため、
@@ -291,7 +294,7 @@ document.addEventListener("DOMContentLoaded", () => {
           meIsAdmin = userData.isAdmin;
           if (meIsAdmin) {
             drawerUsername.classList.add("admin");
-          } else if (hasActivePrize({ prizeExpiresAt: toMillisOrNull(userData.prizeExpiresAt) })) {
+          } else if (hasActivePrize({ prizeGrantedAt: toMillisOrNull(userData.prizeGrantedAt) })) {
             drawerUsername.classList.add("prize");
           }
           myUid = userData.uid;
@@ -301,7 +304,7 @@ document.addEventListener("DOMContentLoaded", () => {
             isAdmin: userData.isAdmin,
             imageUrl: userData.imageUrl || "",
             profileText: userData.profileText || "",
-            prizeExpiresAt: userData.prizeExpiresAt
+            prizeGrantedAt: userData.prizeGrantedAt
           });
 
           talkId = getParmFromUrl("id");
@@ -373,7 +376,7 @@ async function setupMemberSnapshots(talkId) {
             isAdmin: userData.isAdmin || false,
             imageUrl: userData.imageUrl || "",
             profileText: userData.profileText || "",
-            prizeExpiresAt: userData.prizeExpiresAt
+            prizeGrantedAt: userData.prizeGrantedAt
           });
           
           if (!userLastCheckedCache[userId]) {
@@ -612,7 +615,7 @@ async function getAllTalkData(talkId) {
                   isAdmin: userData.isAdmin || false,
                   imageUrl: userData.imageUrl || "",
                   profileText: userData.profileText || "",
-                  prizeExpiresAt: userData.prizeExpiresAt
+                  prizeGrantedAt: userData.prizeGrantedAt
                 });
               } else {
                 setUserCache(messageUserId, { name: "不明なユーザー", isAdmin: false, imageUrl: "", profileText: "" });
@@ -1216,7 +1219,7 @@ async function openReadByModal(readByList) {
             isAdmin: userData.isAdmin || false,
             imageUrl: userData.imageUrl || "",
             profileText: userData.profileText || "",
-            prizeExpiresAt: userData.prizeExpiresAt
+            prizeGrantedAt: userData.prizeGrantedAt
           });
         } else {
           cached = setUserCache(userId, { name: "不明なユーザー", isAdmin: false, imageUrl: "", profileText: "" });
@@ -1789,14 +1792,14 @@ async function handleProfileEditOrSave() {
         { merge: true }
       );
 
-      // キャッシュ情報の更新（name / isAdmin / imageUrl / profileText / prizeExpiresAt を一括で最新化）
+      // キャッシュ情報の更新（name / isAdmin / imageUrl / profileText / prizeGrantedAt を一括で最新化）
       const cached = getUserCache(currentProfileUserId) || {};
       setUserCache(currentProfileUserId, {
         name: newName,
         isAdmin: cached.isAdmin || false,
         imageUrl: finalImageUrl,
         profileText: newProfileText,
-        prizeExpiresAt: cached.prizeExpiresAt
+        prizeGrantedAt: cached.prizeGrantedAt
       });
 
       // 各UIテキストのリアルタイム更新
@@ -1867,7 +1870,7 @@ async function openProfileModal(userId, startEditMode = false) {
         isAdmin: userData.isAdmin || false,
         imageUrl: userData.imageUrl || "",
         profileText: userData.profileText || "",
-        prizeExpiresAt: userData.prizeExpiresAt
+        prizeGrantedAt: userData.prizeGrantedAt
       });
 
       profileName.textContent = userData.name || "名前未設定";
@@ -2293,7 +2296,7 @@ async function openPollVotersModal(answerMap, choiceIndex, choiceLabel) {
             isAdmin: userData.isAdmin || false,
             imageUrl: userData.imageUrl || "",
             profileText: userData.profileText || "",
-            prizeExpiresAt: userData.prizeExpiresAt
+            prizeGrantedAt: userData.prizeGrantedAt
           });
         } else {
           cached = setUserCache(userId, { name: "不明なユーザー", isAdmin: false, imageUrl: "", profileText: "" });
