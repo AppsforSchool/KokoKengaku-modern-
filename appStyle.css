@@ -856,13 +856,17 @@ div, p {
   display: none;
 }
 #profile-name {
-  font-size: 1.2rem;
+  font-size: 1.05rem;
   font-weight: 700;
   color: var(--text);
   word-break: break-all;
   text-align: center;
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  border: 1.5px solid transparent;
+  border-radius: var(--radius-md);
+  box-sizing: border-box;
 }
-#profile-name.admin,
 #drawerUsername.admin {
   background: linear-gradient(
     90deg,
@@ -876,8 +880,38 @@ div, p {
   animation: wave 2s linear infinite;
 }
 /* ★ 景品（「問題投稿」アプリのスペシャルライブで付与される演出）：グラデーションは管理者と同一、速度だけ半分（4s） */
-#profile-name.prize,
 #drawerUsername.prize {
+  background: linear-gradient(
+    90deg,
+    #ff5a5a, #ffbc41, #f5f551, #5eff5e, #84a1ff, #ff45ff, #ff5a5a
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: wave 4s linear infinite;
+}
+/* ★ プロフィールモーダルの名前（「問題投稿」アプリの実装に合わせて、幅・パディングを含めて専用のルールにする） */
+#profile-name.admin {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
+  background: linear-gradient(
+    90deg,
+    #ff5a5a, #ffbc41, #f5f551, #5eff5e, #84a1ff, #ff45ff, #ff5a5a
+  );
+  background-size: 200% auto;
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+  animation: wave 2s linear infinite;
+}
+#profile-name.prize {
+  width: fit-content;
+  max-width: 100%;
+  margin: 0 auto;
   background: linear-gradient(
     90deg,
     #ff5a5a, #ffbc41, #f5f551, #5eff5e, #84a1ff, #ff45ff, #ff5a5a
@@ -899,6 +933,7 @@ div, p {
   border: 1.5px solid var(--border);
   border-radius: var(--radius-md);
   background-color: var(--surface-alt);
+  box-sizing: border-box;
   text-align: center;
   transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease), background-color 0.2s var(--ease);
 }
@@ -959,12 +994,38 @@ div, p {
   display: none;
 }
 
+.profile-edit-button-row {
+  display: flex;
+  gap: 0.6rem;
+  width: 100%;
+}
+#profile-cancel-button {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-weight: 700;
+  font-size: 0.95rem;
+  padding: 0.7rem;
+  flex: 1;
+  text-align: center;
+  cursor: pointer;
+  box-sizing: border-box;
+  background-color: var(--surface-alt);
+  color: var(--text-muted);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  transition: background-color 0.15s var(--ease), border-color 0.15s var(--ease);
+}
+#profile-cancel-button:hover {
+  background-color: var(--border);
+}
+#profile-cancel-button.hidden {
+  display: none;
+}
 #profile-edit-button {
   font-family: "BIZ UDGothic", sans-serif;
   font-weight: 700;
   font-size: 0.95rem;
   padding: 0.7rem;
-  width: 100%;
+  flex: 1;
   text-align: center;
   cursor: pointer;
   display: block;

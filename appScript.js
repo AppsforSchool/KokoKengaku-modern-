@@ -229,6 +229,7 @@ let profileNameInput;
 let profileText;
 let profileTextEdit;
 let profileEditButton;
+let profileCancelButton;
 let isProfileEditing = false;
 let currentProfileUserId = "";
 let canEditCurrentProfile = false; // 現在開いているプロフィールが自分（or管理者権限で）編集可能か
@@ -248,6 +249,7 @@ document.addEventListener("DOMContentLoaded", () => {
   profileText = document.getElementById("profile-text");
   profileTextEdit = document.getElementById("profile-text-edit");
   profileEditButton = document.getElementById("profile-edit-button");
+  profileCancelButton = document.getElementById("profile-cancel-button");
 
   profileModalClose.addEventListener("click", () => {
     profileModal.classList.add("hidden");
@@ -255,6 +257,9 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   profileEditButton.addEventListener("click", handleProfileEditOrSave);
+  profileCancelButton.addEventListener("click", () => {
+    resetProfileEditMode();
+  });
 
   // アイコンをタップ（編集モード中のみ有効）→ ファイル選択を開く
   profileAvatarHolder.addEventListener("click", () => {
@@ -302,6 +307,7 @@ function resetProfileEditMode() {
     profileEditButton.textContent = "プロフィールを編集";
     profileEditButton.disabled = false;
   }
+  if (profileCancelButton) profileCancelButton.classList.add("hidden");
   if (profileName) profileName.classList.remove("hidden");
   if (profileNameInput) profileNameInput.classList.add("hidden");
   if (profileText) profileText.classList.remove("hidden");
@@ -323,16 +329,12 @@ async function handleProfileEditOrSave() {
   if (!isProfileEditing) {
     isProfileEditing = true;
     profileEditButton.textContent = "プロフィールを保存";
+    if (profileCancelButton) profileCancelButton.classList.toggle("hidden", !canEditCurrentProfile);
 
-    let currentName = profileName.textContent;
-    let currentText = profileText.textContent;
-
-    if (currentText === "ステータスメッセージはありません。" || currentText === "取得中...") {
-      currentText = "";
-    }
-    if (currentName === "取得中..." || currentName === "不明なユーザー") {
-      currentName = "";
-    }
+    // 現在のキャッシュからテキストを取得する
+    const cached = getUserCache(currentProfileUserId) || {};
+    const currentName = cached.name || "";
+    const currentText = cached.profileText || "";
 
     profileName.classList.add("hidden");
     profileNameInput.classList.remove("hidden");
@@ -361,7 +363,6 @@ async function handleProfileEditOrSave() {
 
     profileEditButton.disabled = true;
     profileEditButton.textContent = "保存中...";
-    profileModalClose.classList.add("hidden");
 
     try {
       // アイコン画像の変更があれば、先にアップロード（または削除）を確定させる
@@ -385,16 +386,19 @@ async function handleProfileEditOrSave() {
       );
 
       // キャッシュ情報の更新（name / isAdmin / imageUrl / profileText / prizeGrantedAt を一括で最新化）
-      const cached = getUserCache(currentProfileUserId) || {};
-      setUserCache(currentProfileUserId, {
+      const previousCache = getUserCache(currentProfileUserId) || {};
+      const updated = setUserCache(currentProfileUserId, {
         name: newName,
-        isAdmin: cached.isAdmin || false,
+        isAdmin: previousCache.isAdmin || false,
         imageUrl: finalImageUrl,
         profileText: newProfileText,
-        prizeGrantedAt: cached.prizeGrantedAt
+        prizeGrantedAt: previousCache.prizeGrantedAt
       });
 
-      drawerUsername.textContent = newName;
+      // ★ 自分自身のプロフィールを編集した場合のみ、ドロワーの表示名も更新する
+      if (currentProfileUserId === myUserId) {
+        drawerUsername.textContent = newName;
+      }
 
       profileName.textContent = newName;
       profileText.textContent = newProfileText || "ステータスメッセージはありません。";
@@ -403,19 +407,10 @@ async function handleProfileEditOrSave() {
       profileAvatarFile = null;
       profileAvatarRemoved = false;
       profileAvatarHolder.innerHTML = "";
-      profileAvatarHolder.appendChild(createAvatar(newName, "large", profileAvatarCurrentUrl));
+      profileAvatarHolder.appendChild(createAvatar(newName, "large", updated.imageUrl));
 
-      const savedCached = getUserCache(currentProfileUserId) || {};
-      if (savedCached.isAdmin) {
-        profileName.classList.add("admin");
-        profileName.classList.remove("prize");
-      } else if (hasActivePrize(savedCached)) {
-        profileName.classList.add("prize");
-        profileName.classList.remove("admin");
-      } else {
-        profileName.classList.remove("admin");
-        profileName.classList.remove("prize");
-      }
+      profileName.classList.toggle("admin", !!updated.isAdmin);
+      profileName.classList.toggle("prize", !updated.isAdmin && hasActivePrize(updated));
 
       resetProfileEditMode();
       alert("プロフィールを保存しました。");
@@ -437,10 +432,13 @@ async function openProfileModal(userId, startEditMode = false) {
 
   // ★ キャッシュがあれば先にそれを表示し（体感速度優先）、裏で最新データに更新する
   const cached = getUserCache(userId);
+  const hasCachedProfileText = !!cached && cached.profileText !== undefined;
   profileName.textContent = (cached && cached.name) || "取得中...";
   profileName.classList.toggle("admin", !!(cached && cached.isAdmin));
-  profileName.classList.toggle("prize", !(cached && cached.isAdmin) && hasActivePrize(cached));
-  profileText.textContent = (cached && cached.profileText) || "取得中...";
+  profileName.classList.toggle("prize", !!cached && !cached.isAdmin && hasActivePrize(cached));
+  profileText.textContent = hasCachedProfileText
+    ? (cached.profileText || "ステータスメッセージはありません。")
+    : "取得中...";
   profileAvatarCurrentUrl = (cached && cached.imageUrl) || "";
 
   profileAvatarHolder.innerHTML = "";
@@ -449,13 +447,21 @@ async function openProfileModal(userId, startEditMode = false) {
   profileEditButton.classList.toggle("hidden", !canEditCurrentProfile);
   profileModal.classList.remove("hidden");
 
+  // ★ すでにステータスメッセージまでキャッシュ済みなら、Firestoreへは再取得しに行かない
+  if (hasCachedProfileText) {
+    if (canEditCurrentProfile && startEditMode) {
+      handleProfileEditOrSave();
+    }
+    return;
+  }
+
   try {
     const userSnapshot = await db.collection("users_random").doc(userId).get();
     if (userSnapshot.exists) {
       const userData = userSnapshot.data();
 
       // ★ ユーザーデータをまとめてキャッシュに反映
-      setUserCache(userId, {
+      const updated = setUserCache(userId, {
         name: userData.name || "名前未設定",
         isAdmin: userData.isAdmin || false,
         imageUrl: userData.imageUrl || "",
@@ -463,11 +469,11 @@ async function openProfileModal(userId, startEditMode = false) {
         prizeGrantedAt: userData.prizeGrantedAt
       });
 
-      profileName.textContent = userData.name || "名前未設定";
-      profileName.classList.toggle("admin", !!userData.isAdmin);
-      profileName.classList.toggle("prize", !userData.isAdmin && hasActivePrize(getUserCache(userId)));
-      profileText.textContent = userData.profileText || "ステータスメッセージはありません。";
-      profileAvatarCurrentUrl = userData.imageUrl || "";
+      profileName.textContent = updated.name;
+      profileName.classList.toggle("admin", !!updated.isAdmin);
+      profileName.classList.toggle("prize", !updated.isAdmin && hasActivePrize(updated));
+      profileText.textContent = updated.profileText || "ステータスメッセージはありません。";
+      profileAvatarCurrentUrl = updated.imageUrl || "";
 
       profileAvatarHolder.innerHTML = "";
       profileAvatarHolder.appendChild(createAvatar(profileName.textContent, "large", profileAvatarCurrentUrl));
