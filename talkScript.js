@@ -260,10 +260,10 @@ document.addEventListener("DOMContentLoaded", () => {
   drawerOverlay.addEventListener("click", closeDrawer);
   drawerLogoutButton.addEventListener("click", handleLogout);
 
-  // ドロワー内の「プロフィールを編集」ボタン
+  // ドロワー内の「プロフィールをみる」ボタン
   drawerEditProfileButton.addEventListener("click", () => {
     closeDrawer();
-    openProfileModal(myUserId, true); // 自分のプロフィールを編集モードONで開く
+    openProfileModal(myUserId, false); // 自分のプロフィールを表示するだけ（編集モードにはしない）
   });
 });
 
