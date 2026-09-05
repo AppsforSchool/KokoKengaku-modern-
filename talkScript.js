@@ -50,6 +50,9 @@ let userLastCheckedCache = {}; // ★ 最終確認日時用のキャッシュを
 // ★ このセッションを開いた時点での「自分の最終確認日時」。未読区切り線の基準として使うため、
 //   その後 updateLastCheckedTime() で更新されても上書きしない（一度だけ取得して保持する）
 let initialLastCheckedDate = null;
+// ★ 未読区切り線を挿入する対象メッセージID。初回表示時に一度だけ決定して固定する
+//   （これにより、その後に自分や他人が新しく送ったメッセージの前には出なくなる）
+let unreadDividerBeforeMessageId = null;
 let currentRoomMembers = [];   // ★ 現在のルームのメンバーIDリストを保持する変数を追加
 
 // ★ 返信機能用の状態
@@ -568,13 +571,20 @@ async function getAllTalkData(talkId) {
           // ★ isDisplayがfalseのメッセージは表示しない（未設定＝過去のメッセージは表示する）
           if (messageData.isDisplay === false) continue;
 
-          // ★ 自分の最終確認日時より後のメッセージが最初に出てくるところに、未読区切り線を挿入する
-          if (!unreadDividerInserted && initialLastCheckedDate && messageData.time) {
+          // ★ 未読区切り線を出す位置は、初回表示時にのみ判定して固定する
+          //   （このブロックは isThisInitialLoad が true の初回スナップショットでしか実行されないため、
+          //    　その後に自分や他人が新しく送ったメッセージが対象になることはない）
+          if (isThisInitialLoad && unreadDividerBeforeMessageId === null && initialLastCheckedDate && messageData.time) {
             const messageDate = messageData.time.toDate();
             if (messageDate > initialLastCheckedDate) {
-              newTalk.appendChild(buildUnreadDivider());
-              unreadDividerInserted = true;
+              unreadDividerBeforeMessageId = talkDoc.id;
             }
+          }
+
+          // ★ 固定された対象メッセージの直前にだけ、区切り線を挿入する
+          if (!unreadDividerInserted && talkDoc.id === unreadDividerBeforeMessageId) {
+            newTalk.appendChild(buildUnreadDivider());
+            unreadDividerInserted = true;
           }
 
           const message = document.createElement("div");
