@@ -50,6 +50,9 @@ div, p {
 .hidden {
   display: none;
 }
+.visually-hidden-input {
+  display: none;
+}
 
 
 /* --- 起動時オーバーレイ（他画面と共通デザイン） --- */
@@ -195,7 +198,7 @@ div, p {
   color: var(--text);
 }
 
-.drawer button.normal-button {
+.normal-button {
   font-family: "BIZ UDGothic", sans-serif;
   font-weight: 700;
   font-size: 0.95rem;
@@ -213,26 +216,26 @@ div, p {
   box-shadow: var(--shadow-sm);
   transition: transform 0.2s var(--ease), box-shadow 0.2s var(--ease), background-color 0.2s var(--ease);
 }
-.drawer button.normal-button:hover:not(:disabled) {
+.normal-button:hover:not(:disabled) {
   background-color: var(--primary-dark);
   box-shadow: var(--shadow-md);
 }
-.drawer button.normal-button:active:not(:disabled) {
+.normal-button:active:not(:disabled) {
   transform: scale(0.98);
 }
-.drawer button.normal-button:disabled {
+.normal-button:disabled {
   background-color: #dbe0e6;
   color: #9aa4ae;
   border: none;
   box-shadow: none;
 }
-.drawer .logout-button {
+.normal-button.logout-button {
   background-color: var(--surface-alt);
   color: #d64545;
   box-shadow: none;
   border: 1.5px solid var(--border);
 }
-.drawer .logout-button:hover {
+.normal-button.logout-button:hover:not(:disabled) {
   background-color: #fdecec;
   border-color: #f3c8c8;
 }
@@ -809,7 +812,48 @@ div, p {
 }
 .profile-avatar-wrap {
   display: flex;
-  justify-content: center;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+}
+.profile-avatar-wrap #profile-avatar-holder {
+  position: relative;
+}
+.profile-avatar-wrap.editable #profile-avatar-holder {
+  cursor: pointer;
+  transition: opacity 0.15s var(--ease);
+}
+.profile-avatar-wrap.editable #profile-avatar-holder:hover {
+  opacity: 0.82;
+}
+.profile-avatar-wrap.editable #profile-avatar-holder::after {
+  content: "変更";
+  position: absolute;
+  bottom: -2px;
+  right: -2px;
+  background: var(--primary);
+  color: #fff;
+  font-size: 0.62rem;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: var(--radius-full);
+  box-shadow: var(--shadow-sm);
+  pointer-events: none;
+}
+#profile-avatar-remove-button {
+  background: none;
+  border: none;
+  color: #d64545;
+  font-size: 0.8rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: underline;
+  text-decoration-style: dotted;
+  text-underline-offset: 2px;
+  padding: 0;
+}
+#profile-avatar-remove-button.hidden {
+  display: none;
 }
 #profile-name {
   font-size: 1.2rem;
@@ -1110,6 +1154,10 @@ div, p {
   height: 4.4rem;
   min-width: 4.4rem;
   font-size: 1.7rem;
+}
+img.avatar-circle {
+  object-fit: cover;
+  display: block;
 }
 
 
