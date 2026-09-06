@@ -377,7 +377,8 @@ a {
   max-width: 100%;
   max-height: 80vh;
   height: auto;
-  border-radius: var(--radius-md);
+  /* ★ アバター画像(img.avatar-circle)を円形にするため、ここでの角丸指定は無効化している
+        （QRコードなど他の画像は元々四角のままで問題ないため） */
 }
 
 #message-delete-button,
