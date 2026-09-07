@@ -43,6 +43,7 @@ let drawerUserId;
 let drawerLogoutButton;
 let drawerUsername;
 let drawerEditProfileButton; // ドロワーの「プロフィールを編集」ボタン
+let drawerUserListButton; // ドロワーの「ユーザー一覧」ボタン（管理者のみ表示）
 
 // キャッシュ用オブジェクト
 // ★ ユーザーデータの統一キャッシュ（name / isAdmin / imageUrl / profileText / prizeGrantedAt をまとめて保持）
@@ -57,6 +58,127 @@ function setUserCache(userId, data) {
   }
   userDataCache[userId] = Object.assign({}, userDataCache[userId] || {}, normalized);
   return userDataCache[userId];
+}
+
+function formatDateTime(date) {
+  const yyyy = date.getFullYear();
+  const mm = String(date.getMonth() + 1).padStart(2, "0");
+  const dd = String(date.getDate()).padStart(2, "0");
+  const hh = String(date.getHours()).padStart(2, "0");
+  const min = String(date.getMinutes()).padStart(2, "0");
+  return `${yyyy}/${mm}/${dd} ${hh}:${min}`;
+}
+
+// ★ このチャットアプリを最後に開いた日時の更新（「問題投稿」アプリの lastOpenedAt とは別フィールドで独立管理する）
+//   優先度が低いので他の読み込みを妨げないよう、待たずに投げっぱなしにする
+function updateChatLastOpenedAt() {
+  db.collection("users_random")
+    .doc(myUserId)
+    .set({ chatLastOpenedAt: firebase.firestore.FieldValue.serverTimestamp() }, { merge: true })
+    .catch((error) => console.error("最終アクセス日時の更新エラー:", error));
+}
+
+// ================================
+// ★ ユーザー一覧モーダル（管理者のみ）
+// ================================
+let userListModal;
+let userListModalClose;
+let userListArea;
+document.addEventListener("DOMContentLoaded", () => {
+  userListModal = document.getElementById("user-list-modal");
+  userListModalClose = document.getElementById("user-list-modal-close");
+  userListArea = document.getElementById("user-list-area");
+
+  userListModalClose.addEventListener("click", () => {
+    userListModal.classList.add("hidden");
+  });
+});
+
+// ★ 管理者向け：全ユーザーをno順に一覧表示し、右端に最終確認日時を表示する
+async function openUserListModal() {
+  userListArea.innerHTML = "";
+  const loadingMessage = document.createElement("p");
+  loadingMessage.textContent = "読み込み中...";
+  userListArea.appendChild(loadingMessage);
+  userListModal.classList.remove("hidden");
+
+  try {
+    const usersSnap = await db.collection("users_random").get();
+    userListArea.innerHTML = "";
+
+    if (usersSnap.empty) {
+      const emptyMessage = document.createElement("p");
+      emptyMessage.textContent = "ユーザーが見つかりません";
+      userListArea.appendChild(emptyMessage);
+      return;
+    }
+
+    // ★ no順（無ければ最後）に並べる。orderBy("no")だと no の無いユーザーが結果から消えてしまうため、
+    //   取得はそのまま行い、並び替えだけクライアント側で行う
+    const sortedDocs = usersSnap.docs.slice().sort((a, b) => {
+      const noA = typeof a.data().no === "number" ? a.data().no : Infinity;
+      const noB = typeof b.data().no === "number" ? b.data().no : Infinity;
+      return noA - noB;
+    });
+
+    sortedDocs.forEach((doc) => {
+      const userId = doc.id;
+      const userData = doc.data();
+      const name = userData.name || "名前未設定";
+      const isAdmin = !!userData.isAdmin;
+      const imageUrl = userData.imageUrl || "";
+
+      // 他の画面のキャッシュとも整合するよう更新しておく
+      setUserCache(userId, {
+        name,
+        isAdmin,
+        imageUrl,
+        profileText: userData.profileText || "",
+        prizeGrantedAt: userData.prizeGrantedAt
+      });
+
+      const item = document.createElement("div");
+      item.classList.add("member-item");
+      if (isAdmin) {
+        item.classList.add("admin");
+      } else if (hasActivePrize(getUserCache(userId))) {
+        item.classList.add("prize");
+      }
+
+      const left = document.createElement("div");
+      left.classList.add("member-left", "clickable-user");
+      left.style.cursor = "pointer";
+
+      const avatar = createAvatar(name, "small", imageUrl);
+      left.appendChild(avatar);
+
+      const nameSpan = document.createElement("span");
+      nameSpan.classList.add("member-name");
+      nameSpan.textContent = name;
+      left.appendChild(nameSpan);
+
+      left.addEventListener("click", () => {
+        openProfileModal(userId);
+      });
+
+      item.appendChild(left);
+
+      const lastCheckedSpan = document.createElement("span");
+      lastCheckedSpan.classList.add("member-last-checked");
+      lastCheckedSpan.textContent = userData.chatLastOpenedAt
+        ? formatDateTime(userData.chatLastOpenedAt.toDate())
+        : "未確認";
+      item.appendChild(lastCheckedSpan);
+
+      userListArea.appendChild(item);
+    });
+  } catch (error) {
+    console.error("ユーザー一覧の取得エラー:", error);
+    userListArea.innerHTML = "";
+    const errorMessage = document.createElement("p");
+    errorMessage.textContent = "ユーザー一覧の取得に失敗しました。\n" + error;
+    userListArea.appendChild(errorMessage);
+  }
 }
 
 // ★ アバターの頭文字を安全に取り出すヘルパー
@@ -123,6 +245,7 @@ document.addEventListener("DOMContentLoaded", () => {
   drawerLogoutButton = document.getElementById("logout-button");
   drawerUsername = document.getElementById("drawerUsername");
   drawerEditProfileButton = document.getElementById("drawer-edit-profile-button");
+  drawerUserListButton = document.getElementById("drawer-user-list-button");
   
   accountSettingsButton.addEventListener('click', openDrawer);
   drawerCloseButton.addEventListener('click', closeDrawer);
@@ -133,6 +256,12 @@ document.addEventListener("DOMContentLoaded", () => {
   drawerEditProfileButton.addEventListener('click', () => {
     closeDrawer();
     openProfileModal(myUserId, false); // 自分のプロフィールを表示するだけ（編集モードにはしない）
+  });
+
+  // ドロワー内の「ユーザー一覧」ボタン（管理者のみ表示）
+  drawerUserListButton.addEventListener('click', () => {
+    closeDrawer();
+    openUserListModal();
   });
 });
 
@@ -184,6 +313,14 @@ document.addEventListener("DOMContentLoaded", () => {
         if (openCreateTalkModalButton) {
           openCreateTalkModalButton.classList.toggle("hidden", !meIsAdmin);
         }
+
+        // ★「ユーザー一覧」ボタンは管理者にだけ見せる
+        if (drawerUserListButton) {
+          drawerUserListButton.classList.toggle("hidden", !meIsAdmin);
+        }
+
+        // ★ このページを開いた日時を記録する（優先度が低いので待たずに投げっぱなしにする）
+        updateChatLastOpenedAt();
 
         getAllTalkData();
       } else {

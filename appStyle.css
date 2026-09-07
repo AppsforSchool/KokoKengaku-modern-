@@ -868,6 +868,7 @@ div, p {
   border-radius: var(--radius-md);
   box-sizing: border-box;
 }
+.member-item.admin .member-name,
 #drawerUsername.admin {
   background: linear-gradient(
     90deg,
@@ -881,6 +882,7 @@ div, p {
   animation: wave 2s linear infinite;
 }
 /* ★ 景品（「問題投稿」アプリのスペシャルライブで付与される演出）：グラデーションは管理者と同一、速度だけ半分（4s） */
+.member-item.prize .member-name,
 #drawerUsername.prize {
   background: linear-gradient(
     90deg,
@@ -1187,6 +1189,61 @@ div, p {
   background-color: #dbe0e6;
   color: #9aa4ae;
   box-shadow: none;
+}
+
+/* --- ユーザー一覧モーダル（管理者のみ） --- */
+#user-list-area {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  gap: 4px;
+}
+.member-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  padding: 0.6rem 0.5rem;
+  border-radius: var(--radius-sm);
+  gap: 10px;
+  transition: background-color 0.15s var(--ease);
+}
+.member-item:hover {
+  background-color: var(--surface-alt);
+}
+.member-item .member-left {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+.member-name {
+  font-weight: bold;
+  font-size: 1rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.member-last-checked {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: var(--text-muted);
+  flex-shrink: 0;
+}
+.clickable-user {
+  transition: opacity 0.15s var(--ease);
+}
+.clickable-user:hover {
+  opacity: 0.7;
+}
+.avatar-circle.clickable-user {
+  text-decoration: none;
+  transition: transform 0.15s var(--ease);
+}
+.avatar-circle.clickable-user:hover {
+  opacity: 1;
+  transform: scale(1.06);
 }
 
 /* --- アバター（頭文字アイコン） --- */
