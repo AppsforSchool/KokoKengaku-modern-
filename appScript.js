@@ -336,21 +336,21 @@ document.addEventListener("DOMContentLoaded", () => {
    }
     catch (error) {
       console.log(error);
-      alert(error);
+      await AppDialog.alert(error.message || String(error));
     }
   });
 });
 
 const handleLogout = async () => {
-  const isConfirmed = confirm("ログアウトしますか？");
+  const isConfirmed = await AppDialog.confirm("ログアウトしますか？");
   if (isConfirmed) {
     try {
     await auth.signOut(auth);
     console.log("ログアウトしました！");
-    alert("ログアウトしました。");
+    await AppDialog.alert("ログアウトしました。");
   } catch (error) {
     console.error("ログアウトエラー:", error);
-    alert("ログアウトに失敗しました。");
+    await AppDialog.alert("ログアウトに失敗しました。");
   }
   }
 };
@@ -494,7 +494,7 @@ async function handleProfileEditOrSave() {
     const newProfileText = profileTextEdit.value.trim();
 
     if (!newName) {
-      alert("ユーザーネームを入力してください。");
+      await AppDialog.alert("ユーザーネームを入力してください。");
       return;
     }
 
@@ -550,10 +550,10 @@ async function handleProfileEditOrSave() {
       profileName.classList.toggle("prize", !updated.isAdmin && hasActivePrize(updated));
 
       resetProfileEditMode();
-      alert("プロフィールを保存しました。");
+      await AppDialog.alert("プロフィールを保存しました。");
     } catch (error) {
       console.error("プロフィール保存エラー:", error);
-      alert("プロフィールの保存に失敗しました: " + error.message);
+      await AppDialog.alert("プロフィールの保存に失敗しました: " + error.message);
       profileEditButton.disabled = false;
       profileEditButton.textContent = "プロフィールを保存";
     }
@@ -792,7 +792,7 @@ function getAllTalkData() {
       
   } catch (error) {
     console.error("データ取得エラー:", error);
-    alert(error);
+    AppDialog.alert(error.message || String(error));
   }
 }
 
@@ -909,7 +909,7 @@ async function openCreateTalkModal() {
   } catch (error) {
     createTalkMemberLoading.classList.add("hidden");
     console.error("ユーザー一覧の取得エラー:", error);
-    alert("ユーザー一覧の取得に失敗しました。\n" + error.message);
+    await AppDialog.alert("ユーザー一覧の取得に失敗しました。\n" + error.message);
   }
 }
 
@@ -987,7 +987,7 @@ async function handleCreateTalk() {
     createTalkMemberSearch.value = "";
   } catch (error) {
     console.error("トーク作成エラー:", error);
-    alert("トークの作成に失敗しました。\n" + error.message);
+    await AppDialog.alert("トークの作成に失敗しました。\n" + error.message);
   } finally {
     createTalkSubmitButton.textContent = "作成する";
     updateCreateTalkSubmitState();

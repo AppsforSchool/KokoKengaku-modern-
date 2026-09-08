@@ -361,7 +361,7 @@ document.addEventListener("DOMContentLoaded", () => {
       }
     } catch (error) {
       console.log(error);
-      alert(error);
+      await AppDialog.alert(error.message || String(error));
     }
   });
 });
@@ -421,15 +421,15 @@ async function setupMemberSnapshots(talkId) {
 }
 
 const handleLogout = async () => {
-  const isConfirmed = confirm("ログアウトしますか？");
+  const isConfirmed = await AppDialog.confirm("ログアウトしますか？");
   if (isConfirmed) {
     try {
       await auth.signOut(auth);
       console.log("ログアウトしました！");
-      alert("ログアウトしました。");
+      await AppDialog.alert("ログアウトしました。");
     } catch (error) {
       console.error("ログアウトエラー:", error);
-      alert("ログアウトに失敗しました。");
+      await AppDialog.alert("ログアウトに失敗しました。");
     }
   }
 };
@@ -851,7 +851,7 @@ async function getAllTalkData(talkId) {
     
   } catch (error) {
     console.error("データ取得エラー:", error);
-    alert(error);
+    await AppDialog.alert(error.message || String(error));
   }
 }
 
@@ -1415,7 +1415,7 @@ document.addEventListener("DOMContentLoaded", () => {
   });
 
   messageDeleteButton.addEventListener("click", async () => {
-    if (window.confirm('本当に削除しますか？')) {
+    if (await AppDialog.confirm('本当に削除しますか？')) {
       await messageDelete(messageId);
     }
   });
@@ -1488,10 +1488,10 @@ async function newMessageChange(messageId, newUserId, newMessage, newTimeValue) 
     }
 
     await docRef.update(updateData);
-    alert("変更しました。");
+    await AppDialog.alert("変更しました。");
   }
   catch (error) {
-    alert(error);
+    await AppDialog.alert(error.message || String(error));
     console.error(error);
   }
 }
@@ -1505,10 +1505,9 @@ async function messageDelete(messageId) {
       .doc(messageId)
       .update({ isDisplay: false });
     editModal.classList.add("hidden");
-    // alert(messageId);
-    alert("削除しました。");
+    await AppDialog.alert("削除しました。");
   } catch (error) {
-    alert(error);
+    await AppDialog.alert(error.message || String(error));
     console.error(error);
   }
 }
@@ -1581,7 +1580,7 @@ async function openForwardModal(messageDocs) {
   } catch (error) {
     forwardModalLoading.classList.add("hidden");
     console.error("転送先ルーム一覧の取得エラー:", error);
-    alert("転送先ルームの取得に失敗しました。\n" + error.message);
+    await AppDialog.alert("転送先ルームの取得に失敗しました。\n" + error.message);
   }
 }
 
@@ -1619,10 +1618,10 @@ async function forwardMessageToRoom(targetRoomId, roomItemEl) {
     pendingForwardItems = null;
     forwardModal.classList.add("hidden");
     exitSelectionMode(); // ★ 一括選択から転送した場合は、選択モードも終了しておく
-    alert(forwardCount > 1 ? `${forwardCount}件のメッセージを転送しました。` : "転送しました。");
+    await AppDialog.alert(forwardCount > 1 ? `${forwardCount}件のメッセージを転送しました。` : "転送しました。");
   } catch (error) {
     console.error("メッセージ転送エラー:", error);
-    alert("転送に失敗しました。\n" + error.message);
+    await AppDialog.alert("転送に失敗しました。\n" + error.message);
     allItems.forEach((el) => (el.style.pointerEvents = ""));
     if (roomItemEl) roomItemEl.textContent = roomItemEl.textContent.replace("（転送中...）", "");
   }
@@ -1699,7 +1698,7 @@ async function handleBulkDelete() {
   const count = selectedMessageIds.size;
   if (count === 0) return;
 
-  if (!window.confirm(`選択した${count}件のメッセージを削除します。よろしいですか？`)) return;
+  if (!(await AppDialog.confirm(`選択した${count}件のメッセージを削除します。よろしいですか？`))) return;
 
   selectionDeleteButton.disabled = true;
   selectionForwardButton.disabled = true;
@@ -1712,11 +1711,11 @@ async function handleBulkDelete() {
     });
     await batch.commit();
 
-    alert(`${count}件のメッセージを削除しました。`);
+    await AppDialog.alert(`${count}件のメッセージを削除しました。`);
     exitSelectionMode();
   } catch (error) {
     console.error("一括削除エラー:", error);
-    alert("削除に失敗しました。\n" + error.message);
+    await AppDialog.alert("削除に失敗しました。\n" + error.message);
     updateSelectionActionBar();
   }
 }
@@ -1734,14 +1733,14 @@ async function handleBulkForward() {
     const validDocs = docs.filter((doc) => doc.exists);
 
     if (validDocs.length === 0) {
-      alert("転送できるメッセージがありませんでした。");
+      await AppDialog.alert("転送できるメッセージがありませんでした。");
       return;
     }
 
     openForwardModal(validDocs);
   } catch (error) {
     console.error("転送準備エラー:", error);
-    alert("転送するメッセージの取得に失敗しました。\n" + error.message);
+    await AppDialog.alert("転送するメッセージの取得に失敗しました。\n" + error.message);
   }
 }
 
@@ -1893,7 +1892,7 @@ async function handleProfileEditOrSave() {
     const newProfileText = profileTextEdit.value.trim();
 
     if (!newName) {
-      alert("ユーザーネームを入力してください。");
+      await AppDialog.alert("ユーザーネームを入力してください。");
       return;
     }
 
@@ -1951,10 +1950,10 @@ async function handleProfileEditOrSave() {
       profileName.classList.toggle("prize", !updated.isAdmin && hasActivePrize(updated));
 
       resetProfileEditMode();
-      alert("プロフィールを保存しました。");
+      await AppDialog.alert("プロフィールを保存しました。");
     } catch (error) {
       console.error("プロフィール保存エラー:", error);
-      alert("プロフィールの保存に失敗しました: " + error.message);
+      await AppDialog.alert("プロフィールの保存に失敗しました: " + error.message);
       profileEditButton.disabled = false;
       profileEditButton.textContent = "プロフィールを保存";
     }
@@ -2133,7 +2132,7 @@ document.addEventListener("DOMContentLoaded", () => {
       cancelReply(); // ★ 送信成功後は返信状態を解除
     } catch (error) {
       console.error("画像送信中にエラーが発生しました:", error);
-      alert("画像の送信に失敗しました。\n" + error.message);
+      await AppDialog.alert("画像の送信に失敗しました。\n" + error.message);
       
       // エラー時はユーザーがやり直せるようにボタンのロックを解除
       submitImageBtn.disabled = false;
@@ -2296,7 +2295,7 @@ async function submitPoll() {
     cancelReply(); // ★ 送信成功後は返信状態を解除
   } catch (error) {
     console.error("アンケート送信中にエラーが発生しました:", error);
-    alert("アンケートの送信に失敗しました。\n" + error.message);
+    await AppDialog.alert("アンケートの送信に失敗しました。\n" + error.message);
   } finally {
     pollSubmitButton.textContent = "アンケートを送信";
     updatePollSubmitState();
@@ -2372,7 +2371,7 @@ function buildPollWidget(messageDocId, choices, answerMap) {
       });
     } catch (error) {
       console.error("回答の送信に失敗しました:", error);
-      alert("回答の送信に失敗しました。\n" + error.message);
+      await AppDialog.alert("回答の送信に失敗しました。\n" + error.message);
       answerButton.disabled = false;
       answerButton.textContent = originalText;
     }
