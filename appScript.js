@@ -702,7 +702,7 @@ let currentUserLastCheckedMap = {};
 let userDocUnsubscribeForUnread = null;
 let renderedRoomIds = new Set(); // 画面に表示中のルームID（lastCheckedが更新された時に再計算する対象）
 
-function getAllTalkData() {
+async function getAllTalkData() {
   const talkButtonArea = document.getElementById("talk-button-area");
   const talkButtonLoading = document.getElementById("talk-button-loading");
   
@@ -713,7 +713,17 @@ function getAllTalkData() {
     userDocUnsubscribeForUnread();
   }
 
-  // ★ 自分のlastChecked情報を、トーク一覧の更新とは独立してリアルタイム監視する
+  try {
+    // ★ まず自分の最終確認情報（lastChecked）を先に取得しておく。
+    //   これを待たずにルーム一覧の表示を始めると、一瞬「全部未読」→実際の数値、という
+    //   表示のチラつきが起きてしまうため、最初の描画より前に確定させる。
+    const initialUserSnapshot = await db.collection("users_random").doc(myUserId).get();
+    currentUserLastCheckedMap = (initialUserSnapshot.data() || {}).lastChecked || {};
+  } catch (error) {
+    console.error("最終確認情報の初期取得エラー:", error);
+  }
+
+  // ★ 以降のlastChecked変更は、トーク一覧の更新とは独立してリアルタイム監視する
   userDocUnsubscribeForUnread = db.collection("users_random").doc(myUserId)
     .onSnapshot((userDoc) => {
       const userData = userDoc.data() || {};
