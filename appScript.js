@@ -693,6 +693,15 @@ function regroupTalkButtons(talkButtonArea) {
   });
 }
 
+// ★ 自分の lastChecked（各ルームの既読状態）を、常に最新の状態で保持しておく。
+//   以前は毎回 .get() で取り直していたが、ページ読み込み直後は他の書き込み
+//   （chatLastOpenedAtの更新など）とタイミングが重なることがあり、ごく稀に
+//   lastChecked が空のスナップショットを掴んで「全ルーム未読」になる不具合があったため、
+//   専用のリアルタイムリスナーで受け取る方式に変更した。
+let currentUserLastCheckedMap = {};
+let userDocUnsubscribeForUnread = null;
+let renderedRoomIds = new Set(); // 画面に表示中のルームID（lastCheckedが更新された時に再計算する対象）
+
 function getAllTalkData() {
   const talkButtonArea = document.getElementById("talk-button-area");
   const talkButtonLoading = document.getElementById("talk-button-loading");
@@ -700,6 +709,23 @@ function getAllTalkData() {
   if (talkListenerUnsubscribe) {
     talkListenerUnsubscribe();
   }
+  if (userDocUnsubscribeForUnread) {
+    userDocUnsubscribeForUnread();
+  }
+
+  // ★ 自分のlastChecked情報を、トーク一覧の更新とは独立してリアルタイム監視する
+  userDocUnsubscribeForUnread = db.collection("users_random").doc(myUserId)
+    .onSnapshot((userDoc) => {
+      const userData = userDoc.data() || {};
+      currentUserLastCheckedMap = userData.lastChecked || {};
+
+      // 自分の既読状態が更新されたら、すでに表示中の全ルームの未読数を再計算する
+      renderedRoomIds.forEach((roomId) => {
+        updateSingleRoomUnread(roomId, currentUserLastCheckedMap[roomId]);
+      });
+    }, (error) => {
+      console.error("最終確認情報の監視エラー:", error);
+    });
 
   try {
     let query = db.collection("KokoKengaku");
@@ -709,15 +735,10 @@ function getAllTalkData() {
       query = query.where("members", "array-contains", myUserId);
     }
     
-    talkListenerUnsubscribe = query.onSnapshot(async (talkSnapshot) => {
-        
-        // ユーザーの最新の lastChecked を取得
-        const userSnapshot = await db.collection("users_random").doc(myUserId).get();
-        const userData = userSnapshot.data() || {};
-        const lastCheckedMap = userData.lastChecked || {};
+    talkListenerUnsubscribe = query.onSnapshot((talkSnapshot) => {
 
         // 変化（追加・修正・削除）があった差分だけをループ処理する
-        talkSnapshot.docChanges().forEach(async (change) => {
+        talkSnapshot.docChanges().forEach((change) => {
           const talkDoc = change.doc;
           const roomId = talkDoc.id;
           const roomData = talkDoc.data();
@@ -726,6 +747,7 @@ function getAllTalkData() {
           if (change.type === "added") {
             // すでに同じIDのボタンが画面にあれば作成しない（重複防止）
             if (document.getElementById(`room-${roomId}`)) return;
+            renderedRoomIds.add(roomId);
 
             const talkButton = document.createElement("div");
             talkButton.classList.add("talk-button");
@@ -753,7 +775,7 @@ function getAllTalkData() {
             regroupTalkButtons(talkButtonArea);
 
             // この部屋の未読数を計算して書き換える
-            updateSingleRoomUnread(roomId, lastCheckedMap[roomId]);
+            updateSingleRoomUnread(roomId, currentUserLastCheckedMap[roomId]);
           }
           
           // 2. メッセージが届くなどして、ルームの情報が更新された場合
@@ -769,12 +791,13 @@ function getAllTalkData() {
               regroupTalkButtons(talkButtonArea);
 
               // ★ ここがポイント：未読数だけをピンポイントで数え直して更新する
-              updateSingleRoomUnread(roomId, lastCheckedMap[roomId]);
+              updateSingleRoomUnread(roomId, currentUserLastCheckedMap[roomId]);
             }
           }
 
           // 3. ルーム自体が削除された場合
           if (change.type === "removed") {
+            renderedRoomIds.delete(roomId);
             const talkButton = document.getElementById(`room-${roomId}`);
             if (talkButton) talkButton.remove();
             // ★ 削除後、空になったグループの見出しが残らないよう整理し直す
