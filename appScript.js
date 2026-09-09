@@ -796,9 +796,14 @@ async function openCreateTalkModal() {
   try {
     const usersSnapshot = await db.collection("users_random").get();
     allUsersCache = usersSnapshot.docs
-      .map((doc) => ({ userId: doc.id, name: (doc.data() || {}).name || doc.id }))
+      .map((doc) => ({
+        userId: doc.id,
+        name: (doc.data() || {}).name || doc.id,
+        no: typeof (doc.data() || {}).no === "number" ? doc.data().no : Infinity
+      }))
       .filter((u) => u.userId !== myUserId) // ★ 自分は自動的にメンバーへ入るので選択肢からは除く
-      .sort((a, b) => a.name.localeCompare(b.name, "ja"));
+      // ★ no順（無ければ最後）に並べる
+      .sort((a, b) => a.no - b.no);
 
     createTalkMemberLoading.classList.add("hidden");
     renderCreateTalkMemberList("");

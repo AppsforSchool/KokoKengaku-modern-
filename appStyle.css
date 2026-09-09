@@ -1085,6 +1085,13 @@ div, p {
   display: none;
 }
 
+/* ★ このモーダルはフォーム（左揃え）なので、.modal-content の text-align:center を上書きする。
+      .profile-label の align-self:flex-start は親がflexコンテナでないと効かず、
+      センター寄せのまま崩れて見えていたための対応。 */
+#create-talk-modal .modal-content {
+  text-align: left;
+}
+
 #create-talk-title-input,
 #create-talk-member-search {
   font-family: "BIZ UDGothic", sans-serif;
@@ -1095,6 +1102,7 @@ div, p {
   border-radius: var(--radius-md);
   background-color: var(--surface-alt);
   box-sizing: border-box;
+  text-align: left;
   transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease), background-color 0.2s var(--ease);
 }
 #create-talk-title-input:hover,
