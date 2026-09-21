@@ -321,6 +321,7 @@ document.addEventListener("DOMContentLoaded", () => {
           }
 
           // ★ メンバーのリアルタイム監視・キャッシュ化を開始
+          loadingOverlayText.textContent = "メンバー情報を読み込んでいます...";
           await setupMemberSnapshots(talkId);
 
           getAllTalkData(talkId);
@@ -518,6 +519,11 @@ async function getAllTalkData(talkId) {
   const talkArea = document.getElementById("talk-area");
 
   try {
+    // ★ 初回表示時のみ、進捗ステージの文言を「トークルーム情報」に切り替える
+    if (isInitialTalkLoad && !initialLoadSkipped) {
+      loadingOverlayText.textContent = "トークルーム情報を読み込んでいます...";
+    }
+
     const roomSnapshot = await db.collection("KokoKengaku").doc(talkId).get();
     const roomData = roomSnapshot.data();
     talkTitle.textContent = roomData.title;
@@ -564,11 +570,11 @@ async function getAllTalkData(talkId) {
         for (const talkDoc of messageSnapshot.docs) {
           const messageData = talkDoc.data();
 
-          // ★ 初回表示時のみ、トークデータの処理進捗（%）をオーバーレイに表示する
+          // ★ 初回表示時のみ、トーク（メッセージ本体）の処理進捗（%）をオーバーレイに表示する
           processedDocs++;
           if (isThisInitialLoad && !initialLoadSkipped && totalDocs > 0) {
             const percent = Math.round((processedDocs / totalDocs) * 100);
-            loadingOverlayText.textContent = `トークデータを読み込んでいます (${percent}%)`;
+            loadingOverlayText.textContent = `トークを読み込んでいます (${percent}%)`;
           }
 
           // ★ isDisplayがfalseのメッセージは表示しない（未設定＝過去のメッセージは表示する）
