@@ -49,6 +49,67 @@ function hasActivePrize(cached) {
   const grantedAt = cached && cached.prizeGrantedAt;
   return typeof grantedAt === "number" && grantedAt + PRIZE_DURATION_MS > Date.now();
 }
+
+// ★ 複数ユーザーの情報を「1件ずつ直列await」ではなく、まとめて（最大30件ずつの"in"クエリで）取得する共通ヘルパー。
+//   個別に.get()するより大幅に高速。デフォルトではキャッシュ済みのIDは除外するが、
+//   forceRefresh:trueで強制的に最新化できる。lastCheckedTalkIdを渡すと、そのトークの
+//   最終確認日時(userLastCheckedCache)も同時に更新する。
+async function fetchAndCacheUsers(userIds, options = {}) {
+  const { forceRefresh = false, lastCheckedTalkId = null } = options;
+
+  const idsToFetch = Array.from(new Set(userIds)).filter(
+    (id) => id && (forceRefresh || !getUserCache(id))
+  );
+  if (idsToFetch.length === 0) return;
+
+  const CHUNK_SIZE = 30; // ★ Firestoreの"in"クエリは1回あたり最大30件まで
+  const chunks = [];
+  for (let i = 0; i < idsToFetch.length; i += CHUNK_SIZE) {
+    chunks.push(idsToFetch.slice(i, i + CHUNK_SIZE));
+  }
+
+  // ★ チャンクごとのクエリは並列実行する（直列awaitのボトルネックを避けるため）
+  await Promise.all(chunks.map(async (chunk) => {
+    try {
+      const snapshot = await db.collection("users_random")
+        .where(firebase.firestore.FieldPath.documentId(), "in", chunk)
+        .get();
+
+      const foundIds = new Set();
+      snapshot.forEach((doc) => {
+        foundIds.add(doc.id);
+        const userData = doc.data();
+        setUserCache(doc.id, {
+          name: userData.name || "名前未設定",
+          isAdmin: userData.isAdmin || false,
+          imageUrl: userData.imageUrl || "",
+          profileText: userData.profileText || "",
+          prizeGrantedAt: userData.prizeGrantedAt
+        });
+
+        if (lastCheckedTalkId) {
+          if (!userLastCheckedCache[doc.id]) userLastCheckedCache[doc.id] = {};
+          if (userData.lastChecked && userData.lastChecked[lastCheckedTalkId]) {
+            userLastCheckedCache[doc.id][lastCheckedTalkId] =
+              formatDateTime(userData.lastChecked[lastCheckedTalkId].toDate());
+          } else {
+            userLastCheckedCache[doc.id][lastCheckedTalkId] = "";
+          }
+        }
+      });
+
+      // ★ 見つからなかった（存在しない）IDは「不明なユーザー」として確定させておく
+      chunk.forEach((id) => {
+        if (!foundIds.has(id)) {
+          setUserCache(id, { name: "不明なユーザー", isAdmin: false, imageUrl: "", profileText: "" });
+        }
+      });
+    } catch (error) {
+      console.error("ユーザー情報の一括取得エラー:", error);
+    }
+  }));
+}
+
 let userLastCheckedCache = {}; // ★ 最終確認日時用のキャッシュを追加
 // ★ このセッションを開いた時点での「自分の最終確認日時」。未読区切り線の基準として使うため、
 //   その後 updateLastCheckedTime() で更新されても上書きしない（一度だけ取得して保持する）
@@ -57,6 +118,13 @@ let initialLastCheckedDate = null;
 //   （これにより、その後に自分や他人が新しく送ったメッセージの前には出なくなる）
 let unreadDividerBeforeMessageId = null;
 let currentRoomMembers = [];   // ★ 現在のルームのメンバーIDリストを保持する変数を追加
+
+// ★ メッセージ一覧を差分更新（docChanges）で描画するための永続状態
+//   （新着のたびに全メッセージを作り直すのをやめ、変化があった分だけDOMを更新するために使う）
+let talkMessagesContainer = null;  // メッセージ一覧を入れるコンテナ（初回だけ作って使い回す）
+let messagesById = {};             // 全メッセージの生データ（表示可否に関わらず、返信元参照用に保持）
+let messageElementsById = {};      // 画面に表示中のメッセージDOM要素（docId → element）
+let fullMessageOrder = [];         // Firestoreクエリ結果の並び順そのもの（非表示メッセージも含む）
 
 // ★ 返信機能用の状態
 let replyToId = null;               // 返信先メッセージのドキュメントID
@@ -320,11 +388,12 @@ document.addEventListener("DOMContentLoaded", () => {
             initialLastCheckedDate = userData.lastChecked[talkId].toDate();
           }
 
-          // ★ メンバーのリアルタイム監視・キャッシュ化を開始
-          loadingOverlayText.textContent = "メンバー情報を読み込んでいます...";
-          await setupMemberSnapshots(talkId);
+          // ★ メンバーのリアルタイム監視・キャッシュ化を開始（ここでルーム情報も同時に取得し、
+          //   同じドキュメントの二重取得を避けるため getAllTalkData にそのまま渡して使い回す）
+          loadingOverlayText.textContent = "トークルーム・メンバー情報を読み込んでいます...";
+          const preloadedRoomSnapshot = await setupMemberSnapshots(talkId);
 
-          getAllTalkData(talkId);
+          getAllTalkData(talkId, preloadedRoomSnapshot);
 
           // ★ ルームごとの入力中メッセージ下書きを復元
           restoreMessageDraft();
@@ -352,56 +421,30 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 // ★ ルームメンバーの情報を裏側でリアルタイムに監視してキャッシュを更新する関数
+//   取得したルームのスナップショットをそのまま返す（呼び出し元のgetAllTalkDataで同じドキュメントを
+//   二重に取得しないよう再利用するため）
 async function setupMemberSnapshots(talkId) {
   try {
     const roomSnapshot = await db.collection("KokoKengaku").doc(talkId).get();
-    if (!roomSnapshot.exists) return;
+    if (!roomSnapshot.exists) return null;
 
     const roomData = roomSnapshot.data();
     const memberUserIds = roomData.members || [];
     currentRoomMembers = memberUserIds; // ★ ルームに所属するメンバーID一覧を保持
 
-    // 既存のリスナーがあれば念のため解除
+    // ★ 以前はメンバー1人につき1本ずつリアルタイムリスナーを張っていたが、
+    //   人数分の同時接続・初期データ待ちがロードを重くしていたため、
+    //   ページ読み込み時に1回だけ、まとめて（"in"クエリで）取得する方式に変更した。
+    //   代わりに、メンバー一覧モーダルは開くたびに再取得して最新化する（getMemberの呼び出し元を参照）。
     memberSubscribers.forEach(unsub => unsub());
     memberSubscribers = [];
 
-    // 各メンバーのドキュメントに onSnapshot を設定
-    memberUserIds.forEach((userId) => {
-      const unsub = db.collection("users_random").doc(userId).onSnapshot((doc) => {
-        if (doc.exists) {
-          const userData = doc.data();
-          
-          // 各種キャッシュを最新状態に更新
-          setUserCache(userId, {
-            name: userData.name || "名前未設定",
-            isAdmin: userData.isAdmin || false,
-            imageUrl: userData.imageUrl || "",
-            profileText: userData.profileText || "",
-            prizeGrantedAt: userData.prizeGrantedAt
-          });
-          
-          if (!userLastCheckedCache[userId]) {
-            userLastCheckedCache[userId] = {};
-          }
-          
-          if (userData.lastChecked && userData.lastChecked[talkId]) {
-            const dateObject = userData.lastChecked[talkId].toDate();
-            userLastCheckedCache[userId][talkId] = formatDateTime(dateObject);
-          } else {
-            userLastCheckedCache[userId][talkId] = "";
-          }
+    await fetchAndCacheUsers(memberUserIds, { forceRefresh: true, lastCheckedTalkId: talkId });
 
-          // もしメンバーモーダルが現在開いている状態なら、UIを自動で再描画する
-          const memberModal = document.getElementById("member-modal");
-          if (memberModal && !memberModal.classList.contains("hidden")) {
-            getMember(talkId);
-          }
-        }
-      });
-      memberSubscribers.push(unsub);
-    });
+    return roomSnapshot;
   } catch (error) {
     console.error("メンバーの監視設定に失敗しました:", error);
+    return null;
   }
 }
 
@@ -514,17 +557,20 @@ async function waitForImagesThenHideOverlay(images) {
   }
 }
 
-async function getAllTalkData(talkId) {
+async function getAllTalkData(talkId, preloadedRoomSnapshot) {
   const talkTitle = document.getElementById("talk-title");
   const talkArea = document.getElementById("talk-area");
 
   try {
-    // ★ 初回表示時のみ、進捗ステージの文言を「トークルーム情報」に切り替える
-    if (isInitialTalkLoad && !initialLoadSkipped) {
-      loadingOverlayText.textContent = "トークルーム情報を読み込んでいます...";
+    // ★ setupMemberSnapshotsで既に取得済みのスナップショットがあればそれを再利用し、
+    //   同じドキュメントへの二重リクエストを避ける（無ければ念のため自分で取得する）
+    let roomSnapshot = preloadedRoomSnapshot;
+    if (!roomSnapshot) {
+      if (isInitialTalkLoad && !initialLoadSkipped) {
+        loadingOverlayText.textContent = "トークルーム情報を読み込んでいます...";
+      }
+      roomSnapshot = await db.collection("KokoKengaku").doc(talkId).get();
     }
-
-    const roomSnapshot = await db.collection("KokoKengaku").doc(talkId).get();
     const roomData = roomSnapshot.data();
     talkTitle.textContent = roomData.title;
 
@@ -545,57 +591,35 @@ async function getAllTalkData(talkId) {
           isInitialTalkLoad = false;
         }
 
-        const newTalk = document.createElement("div");
-        const loadingText = document.createElement("p");
-        loadingText.textContent = "loading...";
-        talkArea.innerHTML = "";
-        talkArea.appendChild(loadingText);
-        newTalk.innerHTML = "";
+        // ★ メッセージ一覧のコンテナは初回だけ作って talkArea に設置し、以降は使い回す
+        //   （毎回作り直すのをやめて、変化があった差分（docChanges）だけをDOMに反映する）
+        if (!talkMessagesContainer) {
+          talkArea.innerHTML = "";
+          talkMessagesContainer = document.createElement("div");
+          talkArea.appendChild(talkMessagesContainer);
+        }
 
-        // ★ 返信元メッセージを引くためのマップ（同じスナップショット内の全メッセージ）
-        const messagesById = {};
-        messageSnapshot.docs.forEach((doc) => {
-          messagesById[doc.id] = doc.data();
+        const changes = messageSnapshot.docChanges();
+
+        // ★ このバッチで新たに必要になる送信者情報を、1件ずつawaitするのではなく、
+        //   まとめて（最大30件ずつの"in"クエリで並列に）取得しておく
+        const candidateSenderIds = [];
+        changes.forEach((change) => {
+          if (change.type === "removed") return;
+          const data = change.doc.data();
+          if (data.isDisplay === false) return;
+          if (data.userId) candidateSenderIds.push(data.userId);
         });
+        await fetchAndCacheUsers(candidateSenderIds);
 
-        // ★ このスナップショットで表示するメッセージ内の画像要素を集めておく（初回表示時の読み込み待ちに使う）
+        // ★ このバッチで表示された画像要素を集めておく（初回表示時の読み込み待ちに使う）
         const imagesInThisRender = [];
 
-        // ★ 未読区切り線はこのレンダリング内で最大1本だけ挿入する
-        let unreadDividerInserted = false;
+        const totalChanges = changes.length;
+        let processedChanges = 0;
 
-        const totalDocs = messageSnapshot.docs.length;
-        let processedDocs = 0;
-
-        for (const talkDoc of messageSnapshot.docs) {
-          const messageData = talkDoc.data();
-
-          // ★ 初回表示時のみ、トーク（メッセージ本体）の処理進捗（%）をオーバーレイに表示する
-          processedDocs++;
-          if (isThisInitialLoad && !initialLoadSkipped && totalDocs > 0) {
-            const percent = Math.round((processedDocs / totalDocs) * 100);
-            loadingOverlayText.textContent = `トークを読み込んでいます (${percent}%)`;
-          }
-
-          // ★ isDisplayがfalseのメッセージは表示しない（未設定＝過去のメッセージは表示する）
-          if (messageData.isDisplay === false) continue;
-
-          // ★ 未読区切り線を出す位置は、初回表示時にのみ判定して固定する
-          //   （このブロックは isThisInitialLoad が true の初回スナップショットでしか実行されないため、
-          //    　その後に自分や他人が新しく送ったメッセージが対象になることはない）
-          if (isThisInitialLoad && unreadDividerBeforeMessageId === null && initialLastCheckedDate && messageData.time) {
-            const messageDate = messageData.time.toDate();
-            if (messageDate > initialLastCheckedDate) {
-              unreadDividerBeforeMessageId = talkDoc.id;
-            }
-          }
-
-          // ★ 固定された対象メッセージの直前にだけ、区切り線を挿入する
-          if (!unreadDividerInserted && talkDoc.id === unreadDividerBeforeMessageId) {
-            newTalk.appendChild(buildUnreadDivider());
-            unreadDividerInserted = true;
-          }
-
+        // ★ 1件分のメッセージDOMを組み立てる（送信者情報は上で取得済みの前提なのでawait不要）
+        const buildMessageElement = (talkDoc, messageData) => {
           const message = document.createElement("div");
           message.id = "msg-" + talkDoc.id; // ★ 返信ジャンプ先として参照するためのID
           message.classList.add("message");
@@ -611,23 +635,7 @@ async function getAllTalkData(talkId) {
           let senderHasPrize = false;
 
           if (messageUserId) {
-            if (!getUserCache(messageUserId)) {
-              const userSnapshot = await db.collection("users_random").doc(messageUserId).get();
-            
-              if (userSnapshot.exists) {
-                const userData = userSnapshot.data();
-                setUserCache(messageUserId, {
-                  name: userData.name || "名前未設定",
-                  isAdmin: userData.isAdmin || false,
-                  imageUrl: userData.imageUrl || "",
-                  profileText: userData.profileText || "",
-                  prizeGrantedAt: userData.prizeGrantedAt
-                });
-              } else {
-                setUserCache(messageUserId, { name: "不明なユーザー", isAdmin: false, imageUrl: "", profileText: "" });
-              }
-            }
-            const cached = getUserCache(messageUserId);
+            const cached = getUserCache(messageUserId) || { name: "不明なユーザー", isAdmin: false, imageUrl: "" };
             senderName = cached.name;
             isAdmin = cached.isAdmin;
             senderImageUrl = cached.imageUrl;
@@ -817,11 +825,92 @@ async function getAllTalkData(talkId) {
           messageRow.appendChild(bubbleCol);
 
           message.appendChild(messageRow);
+          return message;
+        };
 
-          newTalk.appendChild(message);
-        }
-        talkArea.innerHTML = "";
-        talkArea.appendChild(newTalk);
+        // ★ 表示中のメッセージのDOM要素の中から、fullMessageOrder上でindexより後ろにある
+        //   最初の要素を探す（次のメッセージの直前に挿入するための基準点として使う）
+        const findNextRenderedElementAfter = (index) => {
+          for (let i = index + 1; i < fullMessageOrder.length; i++) {
+            const el = messageElementsById[fullMessageOrder[i]];
+            if (el) return el;
+          }
+          return null;
+        };
+
+        changes.forEach((change) => {
+          processedChanges++;
+          if (isThisInitialLoad && !initialLoadSkipped && totalChanges > 0) {
+            const percent = Math.round((processedChanges / totalChanges) * 100);
+            loadingOverlayText.textContent = `トークを読み込んでいます (${percent}%)`;
+          }
+
+          const talkDoc = change.doc;
+          const docId = talkDoc.id;
+          const previousData = messagesById[docId];
+          const messageData = change.type === "removed" ? previousData : talkDoc.data();
+          if (!messageData) return; // 存在しないデータのremovedは無視
+
+          // ★ Firestoreの並び順そのもの（非表示メッセージも含む）を、公式手順通りに更新する
+          if (change.oldIndex !== -1 && change.oldIndex < fullMessageOrder.length) {
+            fullMessageOrder.splice(change.oldIndex, 1);
+          }
+          if (change.type !== "removed" && change.newIndex !== -1) {
+            fullMessageOrder.splice(change.newIndex, 0, docId);
+          }
+
+          // ★ 返信元参照用のマップは、表示可否に関わらず全メッセージ分を保持する
+          if (change.type === "removed") {
+            delete messagesById[docId];
+          } else {
+            messagesById[docId] = messageData;
+          }
+
+          // ★ 未読区切り線を出す位置は、初回表示時にのみ判定して固定する
+          //   （このブロックは isThisInitialLoad が true の初回スナップショットでしか実行されないため、
+          //    　その後に自分や他人が新しく送ったメッセージが対象になることはない）
+          if (isThisInitialLoad && unreadDividerBeforeMessageId === null && initialLastCheckedDate && messageData.time && messageData.isDisplay !== false) {
+            const messageDate = messageData.time.toDate();
+            if (messageDate > initialLastCheckedDate) {
+              unreadDividerBeforeMessageId = docId;
+            }
+          }
+
+          const shouldDisplay = change.type !== "removed" && messageData.isDisplay !== false;
+          const existingElement = messageElementsById[docId];
+
+          if (!shouldDisplay) {
+            // ★ 削除・非表示化された場合は、表示されていれば取り除くだけ
+            if (existingElement) {
+              existingElement.remove();
+              delete messageElementsById[docId];
+            }
+            return;
+          }
+
+          const messageElement = buildMessageElement(talkDoc, messageData);
+          const isDividerTarget = docId === unreadDividerBeforeMessageId;
+          const existingDividerEl = document.getElementById("unread-divider");
+
+          // ★ 管理者が送信時刻を編集した場合など、並び順が変わることがあるため、
+          //   既存要素（と、対象なら区切り線）を一旦外してから、正しい位置へ入れ直す
+          if (existingElement) {
+            existingElement.remove();
+          }
+          if (isDividerTarget && existingDividerEl) {
+            existingDividerEl.remove();
+          }
+
+          const idxInFullOrder = fullMessageOrder.indexOf(docId);
+          const referenceElement = findNextRenderedElementAfter(idxInFullOrder);
+          talkMessagesContainer.insertBefore(messageElement, referenceElement || null);
+
+          // ★ 固定された対象メッセージの直前にだけ、区切り線を挿入する
+          if (isDividerTarget) {
+            talkMessagesContainer.insertBefore(buildUnreadDivider(), messageElement);
+          }
+          messageElementsById[docId] = messageElement;
+        });
 
         // ★ 初回表示時は「未読区切り線」があればそれを一番上に、無ければ一番下にスクロール。
         //   2回目以降（新着メッセージ受信時など）は、これまで通り一番下にスクロールする。
@@ -1180,10 +1269,16 @@ document.addEventListener("DOMContentLoaded", () => {
   memberModal = document.getElementById("member-modal");
   memberModalClose = document.getElementById("member-modal-close");
   
-  memberButton.addEventListener("click", () => {
+  memberButton.addEventListener("click", async () => {
     memberModal.classList.remove("hidden");
     const talkId = getParmFromUrl("id");
-    getMember(talkId); // ★ キャッシュから瞬時にUI描画を行うため、完全にノンブロッキングで一瞬で開く
+    getMember(talkId); // ★ まずキャッシュから瞬時にUI描画を行う（ノンブロッキングで一瞬で開く）
+
+    // ★ 常時リスナーを張らなくなった代わりに、開くたびに最新情報へ更新する
+    await fetchAndCacheUsers(currentRoomMembers, { forceRefresh: true, lastCheckedTalkId: talkId });
+    if (!memberModal.classList.contains("hidden")) {
+      getMember(talkId); // 最新データで再描画
+    }
   });
   memberModalClose.addEventListener("click", () => {
     memberModal.classList.add("hidden");

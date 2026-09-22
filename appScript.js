@@ -34,7 +34,9 @@ function hasActivePrize(cached) {
 }
 
 let loadingOverlay;
+let loadingOverlayText;
 let noActiveOverlay;
+let selectionContainer; // ★ トーク一覧本体。読み込み完了までは非表示にしておく
 let drawerOverlay;
 let accountSettingsDrawer;
 let drawerCloseButton;
@@ -112,7 +114,9 @@ async function uploadImageToImgbb(file) {
 
 document.addEventListener("DOMContentLoaded", () => {
   loadingOverlay = document.getElementById("loading-overlay");
+  loadingOverlayText = document.getElementById("loading-overlay-text");
   noActiveOverlay = document.getElementById("no-active-overlay");
+  selectionContainer = document.getElementById("selection-container");
   
   drawerOverlay = document.getElementById("drawerOverlay");
   accountSettingsDrawer = document.getElementById("accountSettingsDrawer");
@@ -155,7 +159,7 @@ document.addEventListener("DOMContentLoaded", () => {
       myUserId = user.email.split("@")[0];
       drawerUserId.textContent = myUserId;
       
-      
+      loadingOverlayText.textContent = "ユーザー情報を確認しています...";
       const userSnapshot = await db.collection("users_random").doc(myUserId).get();
       const userData = userSnapshot.data();
 
@@ -177,7 +181,7 @@ document.addEventListener("DOMContentLoaded", () => {
           prizeGrantedAt: userData.prizeGrantedAt
         });
 
-        loadingOverlay.classList.add("hidden");
+        // ★ ローディングオーバーレイは、トーク一覧の初回表示が完了するまで getAllTalkData 側で消す
 
         // ★「新しいトークを作成」ボタンは管理者にだけ見せる
         const openCreateTalkModalButton = document.getElementById("open-create-talk-modal-button");
@@ -564,6 +568,15 @@ function regroupTalkButtons(talkButtonArea) {
 let currentUserLastCheckedMap = {};
 let userDocUnsubscribeForUnread = null;
 let renderedRoomIds = new Set(); // 画面に表示中のルームID（lastCheckedが更新された時に再計算する対象）
+let isInitialTalkListLoad = true; // ★ 初回のトーク一覧表示かどうか（進捗表示・オーバーレイの制御に使う）
+
+// ★ ローディングオーバーレイを閉じ、裏に隠していたトーク一覧本体を表示する
+function hideLoadingOverlayNowForAppList() {
+  loadingOverlay.classList.add("hidden");
+  if (selectionContainer) {
+    selectionContainer.classList.remove("hidden");
+  }
+}
 
 async function getAllTalkData() {
   const talkButtonArea = document.getElementById("talk-button-area");
@@ -580,6 +593,9 @@ async function getAllTalkData() {
     // ★ まず自分の最終確認情報（lastChecked）を先に取得しておく。
     //   これを待たずにルーム一覧の表示を始めると、一瞬「全部未読」→実際の数値、という
     //   表示のチラつきが起きてしまうため、最初の描画より前に確定させる。
+    if (isInitialTalkListLoad) {
+      loadingOverlayText.textContent = "最終確認情報を読み込んでいます...";
+    }
     const initialUserSnapshot = await db.collection("users_random").doc(myUserId).get();
     currentUserLastCheckedMap = (initialUserSnapshot.data() || {}).lastChecked || {};
   } catch (error) {
@@ -600,6 +616,10 @@ async function getAllTalkData() {
       console.error("最終確認情報の監視エラー:", error);
     });
 
+  if (isInitialTalkListLoad) {
+    loadingOverlayText.textContent = "トークルーム情報を読み込んでいます...";
+  }
+
   try {
     let query = db.collection("KokoKengaku");
     
@@ -608,10 +628,27 @@ async function getAllTalkData() {
       query = query.where("members", "array-contains", myUserId);
     }
     
-    talkListenerUnsubscribe = query.onSnapshot((talkSnapshot) => {
+    talkListenerUnsubscribe = query.onSnapshot(async (talkSnapshot) => {
+        // ★ このスナップショットが「初回のトーク一覧表示」かどうかを固定しておく
+        const isThisInitialLoad = isInitialTalkListLoad;
+        if (isThisInitialLoad) {
+          isInitialTalkListLoad = false;
+        }
+
+        const changes = talkSnapshot.docChanges();
+        const totalChanges = changes.length;
+        let processedChanges = 0;
+        // ★ 初回表示時のみ、各ルームの未読数計算が完了するのを待ってからオーバーレイを閉じる
+        const unreadCountPromises = [];
 
         // 変化（追加・修正・削除）があった差分だけをループ処理する
-        talkSnapshot.docChanges().forEach((change) => {
+        changes.forEach((change) => {
+          processedChanges++;
+          if (isThisInitialLoad && totalChanges > 0) {
+            const percent = Math.round((processedChanges / totalChanges) * 100);
+            loadingOverlayText.textContent = `トーク一覧を読み込んでいます (${percent}%)`;
+          }
+
           const talkDoc = change.doc;
           const roomId = talkDoc.id;
           const roomData = talkDoc.data();
@@ -648,7 +685,8 @@ async function getAllTalkData() {
             regroupTalkButtons(talkButtonArea);
 
             // この部屋の未読数を計算して書き換える
-            updateSingleRoomUnread(roomId, currentUserLastCheckedMap[roomId]);
+            const unreadPromise = updateSingleRoomUnread(roomId, currentUserLastCheckedMap[roomId]);
+            if (isThisInitialLoad) unreadCountPromises.push(unreadPromise);
           }
           
           // 2. メッセージが届くなどして、ルームの情報が更新された場合
@@ -664,7 +702,8 @@ async function getAllTalkData() {
               regroupTalkButtons(talkButtonArea);
 
               // ★ ここがポイント：未読数だけをピンポイントで数え直して更新する
-              updateSingleRoomUnread(roomId, currentUserLastCheckedMap[roomId]);
+              const unreadPromise = updateSingleRoomUnread(roomId, currentUserLastCheckedMap[roomId]);
+              if (isThisInitialLoad) unreadCountPromises.push(unreadPromise);
             }
           }
 
@@ -681,6 +720,15 @@ async function getAllTalkData() {
         // 初回のローディング非表示処理
         talkButtonLoading.classList.add("hidden");
         talkButtonArea.classList.remove("hidden");
+
+        // ★ 初回表示時のみ、各ルームの未読数計算が終わるまでオーバーレイを出したままにする
+        if (isThisInitialLoad) {
+          if (unreadCountPromises.length > 0) {
+            loadingOverlayText.textContent = "未読件数を計算しています...";
+            await Promise.all(unreadCountPromises);
+          }
+          hideLoadingOverlayNowForAppList();
+        }
         
       }, (error) => {
         console.error("リアルタイムリスナーエラー:", error);
@@ -689,6 +737,8 @@ async function getAllTalkData() {
   } catch (error) {
     console.error("データ取得エラー:", error);
     AppDialog.alert(error.message || String(error));
+    // ★ エラー時にオーバーレイが出っぱなしにならないよう、念のため閉じておく
+    hideLoadingOverlayNowForAppList();
   }
 }
 
@@ -700,14 +750,17 @@ async function updateSingleRoomUnread(roomId, lastCheckedTimestamp) {
   const lastCheckedTime = lastCheckedTimestamp ? lastCheckedTimestamp.toDate() : new Date(0);
 
   try {
-    // 対象の部屋のメッセージ数（未読）だけをカウント
+    // ★ 該当メッセージを全部ダウンロードしてから件数を数えるのではなく、
+    //   Firestoreの集計クエリ(count())で「件数だけ」をサーバー側で数えてもらう。
+    //   本文・画像URルなどのフルドキュメントを転送しないため、大幅に軽量。
     const unreadSnapshot = await db.collection("KokoKengaku")
       .doc(roomId)
       .collection("talk")
       .where("time", ">", lastCheckedTime)
+      .count()
       .get();
 
-    const unreadCount = unreadSnapshot.size;
+    const unreadCount = unreadSnapshot.data().count;
 
     // テキストとクラス（見た目）をピンポイントで更新
     newMessageArea.textContent = `新着: ${unreadCount}件`;
