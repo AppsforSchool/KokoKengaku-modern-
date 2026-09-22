@@ -748,29 +748,40 @@ async function updateSingleRoomUnread(roomId, lastCheckedTimestamp) {
   if (!newMessageArea) return;
 
   const lastCheckedTime = lastCheckedTimestamp ? lastCheckedTimestamp.toDate() : new Date(0);
+  const baseQuery = db.collection("KokoKengaku")
+    .doc(roomId)
+    .collection("talk")
+    .where("time", ">", lastCheckedTime);
+
+  let unreadCount = null;
 
   try {
     // ★ 該当メッセージを全部ダウンロードしてから件数を数えるのではなく、
     //   Firestoreの集計クエリ(count())で「件数だけ」をサーバー側で数えてもらう。
-    //   本文・画像URルなどのフルドキュメントを転送しないため、大幅に軽量。
-    const unreadSnapshot = await db.collection("KokoKengaku")
-      .doc(roomId)
-      .collection("talk")
-      .where("time", ">", lastCheckedTime)
-      .count()
-      .get();
-
-    const unreadCount = unreadSnapshot.data().count;
-
-    // テキストとクラス（見た目）をピンポイントで更新
-    newMessageArea.textContent = `新着: ${unreadCount}件`;
-    if (unreadCount === 0) {
-      newMessageArea.classList.add("no-message");
-    } else {
-      newMessageArea.classList.remove("no-message");
+    //   本文・画像URLなどのフルドキュメントを転送しないため、大幅に軽量。
+    const unreadSnapshot = await baseQuery.count().get();
+    unreadCount = unreadSnapshot.data().count;
+  } catch (countError) {
+    // ★ 集計クエリが使えない／失敗する場合でも未読数が出せるように、
+    //   以前の「全件取得して件数を数える」方式にフォールバックする
+    console.error(`未読数の集計クエリに失敗 [Room: ${roomId}]。通常のクエリにフォールバックします:`, countError);
+    try {
+      const fallbackSnapshot = await baseQuery.get();
+      unreadCount = fallbackSnapshot.size;
+    } catch (fallbackError) {
+      // ★ どちらも失敗した場合は「取得中...」のまま止まらないよう、エラー状態を明示する
+      console.error(`未読数の取得に失敗 [Room: ${roomId}]:`, fallbackError);
+      newMessageArea.textContent = "取得失敗";
+      return;
     }
-  } catch (error) {
-    console.error(`未読数更新エラー [Room: ${roomId}]:`, error);
+  }
+
+  // テキストとクラス（見た目）をピンポイントで更新
+  newMessageArea.textContent = `新着: ${unreadCount}件`;
+  if (unreadCount === 0) {
+    newMessageArea.classList.add("no-message");
+  } else {
+    newMessageArea.classList.remove("no-message");
   }
 }
 
