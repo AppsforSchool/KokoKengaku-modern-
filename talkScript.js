@@ -139,6 +139,7 @@ let memberSubscribers = [];
 
 let loadingOverlay;
 let loadingOverlayText;
+let loadingProgressBarFill;
 let loadingOverlaySkipButton;
 let selectionContainer; // ★ トーク本体（タイトル・メッセージ一覧など）。読み込み完了までは非表示にしておく
 let noActiveOverlay;
@@ -303,6 +304,7 @@ document.addEventListener("DOMContentLoaded", () => {
 document.addEventListener("DOMContentLoaded", () => {
   loadingOverlay = document.getElementById("loading-overlay");
   loadingOverlayText = document.getElementById("loading-overlay-text");
+  loadingProgressBarFill = document.getElementById("loading-progress-bar-fill");
   loadingOverlaySkipButton = document.getElementById("loading-overlay-skip-button");
   selectionContainer = document.getElementById("selection-container");
   noActiveOverlay = document.getElementById("no-active-overlay");
@@ -390,7 +392,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
           // ★ メンバーのリアルタイム監視・キャッシュ化を開始（ここでルーム情報も同時に取得し、
           //   同じドキュメントの二重取得を避けるため getAllTalkData にそのまま渡して使い回す）
-          loadingOverlayText.textContent = "トークルーム・メンバー情報を読み込んでいます...";
+          setLoadingStage("トークルーム・メンバー情報を読み込んでいます...", 10);
           const preloadedRoomSnapshot = await setupMemberSnapshots(talkId);
 
           getAllTalkData(talkId, preloadedRoomSnapshot);
@@ -504,6 +506,18 @@ function scrollTalkAreaToTarget() {
   }
 }
 
+// ★ ローディングオーバーレイの段階テキストと、その下の進捗バーをまとめて更新する
+//   （画像読み込み段階は対象外。0〜100の数値で進捗バーの幅を指定する）
+function setLoadingStage(text, percent) {
+  if (loadingOverlayText) {
+    loadingOverlayText.textContent = text;
+  }
+  if (loadingProgressBarFill && typeof percent === "number") {
+    const clamped = Math.max(0, Math.min(100, percent));
+    loadingProgressBarFill.style.width = `${clamped}%`;
+  }
+}
+
 // ★ ローディングオーバーレイを即座に閉じ、裏に隠していたトーク本体を表示する
 function hideLoadingOverlayNow() {
   loadingOverlay.classList.add("hidden");
@@ -567,7 +581,7 @@ async function getAllTalkData(talkId, preloadedRoomSnapshot) {
     let roomSnapshot = preloadedRoomSnapshot;
     if (!roomSnapshot) {
       if (isInitialTalkLoad && !initialLoadSkipped) {
-        loadingOverlayText.textContent = "トークルーム情報を読み込んでいます...";
+        setLoadingStage("トークルーム情報を読み込んでいます...", 25);
       }
       roomSnapshot = await db.collection("KokoKengaku").doc(talkId).get();
     }
@@ -842,7 +856,8 @@ async function getAllTalkData(talkId, preloadedRoomSnapshot) {
           processedChanges++;
           if (isThisInitialLoad && !initialLoadSkipped && totalChanges > 0) {
             const percent = Math.round((processedChanges / totalChanges) * 100);
-            loadingOverlayText.textContent = `トークを読み込んでいます (${percent}%)`;
+            // ★ このステージは進捗バー全体の30%〜100%の区間にマッピングする
+            setLoadingStage(`トークを読み込んでいます (${percent}%)`, 30 + (percent / 100) * 70);
           }
 
           const talkDoc = change.doc;
@@ -924,6 +939,9 @@ async function getAllTalkData(talkId, preloadedRoomSnapshot) {
 
         // ★ 初回のトーク表示時のみ、画像の読み込みが終わる（またはスキップされる）までオーバーレイを出したままにする
         if (isThisInitialLoad) {
+          // ★ 画像を除く読み込みはここまでで完了なので、進捗バーを満タンにしておく
+          //   （以降の画像読み込み待ちは進捗バーの対象外）
+          if (loadingProgressBarFill) loadingProgressBarFill.style.width = "100%";
           await waitForImagesThenHideOverlay(imagesInThisRender);
         }
       });

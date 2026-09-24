@@ -35,6 +35,7 @@ function hasActivePrize(cached) {
 
 let loadingOverlay;
 let loadingOverlayText;
+let loadingProgressBarFill;
 let noActiveOverlay;
 let selectionContainer; // ★ トーク一覧本体。読み込み完了までは非表示にしておく
 let drawerOverlay;
@@ -115,6 +116,7 @@ async function uploadImageToImgbb(file) {
 document.addEventListener("DOMContentLoaded", () => {
   loadingOverlay = document.getElementById("loading-overlay");
   loadingOverlayText = document.getElementById("loading-overlay-text");
+  loadingProgressBarFill = document.getElementById("loading-progress-bar-fill");
   noActiveOverlay = document.getElementById("no-active-overlay");
   selectionContainer = document.getElementById("selection-container");
   
@@ -159,7 +161,7 @@ document.addEventListener("DOMContentLoaded", () => {
       myUserId = user.email.split("@")[0];
       drawerUserId.textContent = myUserId;
       
-      loadingOverlayText.textContent = "ユーザー情報を確認しています...";
+      setLoadingStage("ユーザー情報を確認しています...", 10);
       const userSnapshot = await db.collection("users_random").doc(myUserId).get();
       const userData = userSnapshot.data();
 
@@ -570,6 +572,18 @@ let userDocUnsubscribeForUnread = null;
 let renderedRoomIds = new Set(); // 画面に表示中のルームID（lastCheckedが更新された時に再計算する対象）
 let isInitialTalkListLoad = true; // ★ 初回のトーク一覧表示かどうか（進捗表示・オーバーレイの制御に使う）
 
+// ★ ローディングオーバーレイの段階テキストと、その下の進捗バーをまとめて更新する
+//   （画像は関係ないこの画面では、全ステージがそのまま進捗バーの対象になる）
+function setLoadingStage(text, percent) {
+  if (loadingOverlayText) {
+    loadingOverlayText.textContent = text;
+  }
+  if (loadingProgressBarFill && typeof percent === "number") {
+    const clamped = Math.max(0, Math.min(100, percent));
+    loadingProgressBarFill.style.width = `${clamped}%`;
+  }
+}
+
 // ★ ローディングオーバーレイを閉じ、裏に隠していたトーク一覧本体を表示する
 function hideLoadingOverlayNowForAppList() {
   loadingOverlay.classList.add("hidden");
@@ -594,7 +608,7 @@ async function getAllTalkData() {
     //   これを待たずにルーム一覧の表示を始めると、一瞬「全部未読」→実際の数値、という
     //   表示のチラつきが起きてしまうため、最初の描画より前に確定させる。
     if (isInitialTalkListLoad) {
-      loadingOverlayText.textContent = "最終確認情報を読み込んでいます...";
+      setLoadingStage("最終確認情報を読み込んでいます...", 20);
     }
     const initialUserSnapshot = await db.collection("users_random").doc(myUserId).get();
     currentUserLastCheckedMap = (initialUserSnapshot.data() || {}).lastChecked || {};
@@ -617,7 +631,7 @@ async function getAllTalkData() {
     });
 
   if (isInitialTalkListLoad) {
-    loadingOverlayText.textContent = "トークルーム情報を読み込んでいます...";
+    setLoadingStage("トークルーム情報を読み込んでいます...", 30);
   }
 
   try {
@@ -646,7 +660,8 @@ async function getAllTalkData() {
           processedChanges++;
           if (isThisInitialLoad && totalChanges > 0) {
             const percent = Math.round((processedChanges / totalChanges) * 100);
-            loadingOverlayText.textContent = `トーク一覧を読み込んでいます (${percent}%)`;
+            // ★ このステージは進捗バー全体の30%〜75%の区間にマッピングする
+            setLoadingStage(`トーク一覧を読み込んでいます (${percent}%)`, 30 + (percent / 100) * 45);
           }
 
           const talkDoc = change.doc;
@@ -724,8 +739,26 @@ async function getAllTalkData() {
         // ★ 初回表示時のみ、各ルームの未読数計算が終わるまでオーバーレイを出したままにする
         if (isThisInitialLoad) {
           if (unreadCountPromises.length > 0) {
-            loadingOverlayText.textContent = "未読件数を計算しています...";
-            await Promise.all(unreadCountPromises);
+            // ★「止まっているのか進んでいるのか分からない」を防ぐため、1件終わるごとに
+            //   件数と進捗バーを更新する（Promise.allでまとめて待つだけにしない）
+            const totalUnreadChecks = unreadCountPromises.length;
+            let completedUnreadChecks = 0;
+            setLoadingStage(`未読件数を計算しています (0/${totalUnreadChecks})`, 75);
+
+            await Promise.all(unreadCountPromises.map((promise) =>
+              promise
+                .catch((error) => {
+                  console.error("未読数計算の待機中にエラー:", error);
+                })
+                .then(() => {
+                  completedUnreadChecks++;
+                  const percent = 75 + (completedUnreadChecks / totalUnreadChecks) * 25;
+                  setLoadingStage(
+                    `未読件数を計算しています (${completedUnreadChecks}/${totalUnreadChecks})`,
+                    percent
+                  );
+                })
+            ));
           }
           hideLoadingOverlayNowForAppList();
         }
