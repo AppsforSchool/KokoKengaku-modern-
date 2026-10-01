@@ -1,3 +1,5 @@
+import { initPush, logoutPush, setupPushButton } from "./notify.js";
+
 const firebaseConfig = {
   apiKey: "AIzaSyAqIiNj0N4WruPSOkWbeo5gxzsNyeMkuLo",
   authDomain: "appsforschool-study.firebaseapp.com",
@@ -191,6 +193,10 @@ document.addEventListener("DOMContentLoaded", () => {
           openCreateTalkModalButton.classList.toggle("hidden", !meIsAdmin);
         }
 
+        // ★ プッシュ通知の初期化（失敗してもトーク一覧の表示には影響させない）
+        initPush(db, myUserId);
+        setupPushButton("enable-push-button");
+
         getAllTalkData();
       } else {
         loadingOverlay.classList.add("hidden");
@@ -214,6 +220,7 @@ const handleLogout = async () => {
   const isConfirmed = await AppDialog.confirm("ログアウトしますか？");
   if (isConfirmed) {
     try {
+    await logoutPush(); // ★ この端末への通知紐づけを解除
     await auth.signOut(auth);
     console.log("ログアウトしました！");
     await AppDialog.alert("ログアウトしました。");

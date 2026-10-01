@@ -1,3 +1,5 @@
+import { initPush, logoutPush, setupPushButton, sendMessageNotification } from "./notify.js";
+
 const firebaseConfig = {
   apiKey: "AIzaSyAqIiNj0N4WruPSOkWbeo5gxzsNyeMkuLo",
   authDomain: "appsforschool-study.firebaseapp.com",
@@ -395,6 +397,10 @@ document.addEventListener("DOMContentLoaded", () => {
           setLoadingStage("トークルーム・メンバー情報を読み込んでいます...", 10);
           const preloadedRoomSnapshot = await setupMemberSnapshots(talkId);
 
+          // ★ プッシュ通知の初期化（失敗してもトーク表示には影響させない）
+          initPush(db, myUserId);
+          setupPushButton("enable-push-button");
+
           getAllTalkData(talkId, preloadedRoomSnapshot);
 
           // ★ ルームごとの入力中メッセージ下書きを復元
@@ -454,6 +460,7 @@ const handleLogout = async () => {
   const isConfirmed = await AppDialog.confirm("ログアウトしますか？");
   if (isConfirmed) {
     try {
+      await logoutPush(); // ★ この端末への通知紐づけを解除
       await auth.signOut(auth);
       console.log("ログアウトしました！");
       await AppDialog.alert("ログアウトしました。");
@@ -1146,6 +1153,31 @@ function clearMessageDraft(id) {
   }
 }
 
+// ★ 現在のトークルームのメンバー（自分以外）へ新着通知を送る。失敗しても送信処理には影響しない
+function notifyRoom(text, replyTargetId = replyToId) {
+  const titleEl = document.getElementById("talk-title");
+
+  // ★ 返信メッセージなら、返信先の投稿者（ユーザーID・表示名）を調べて通知文に使う
+  let replyToUserId = null;
+  let replyToName = "";
+  if (replyTargetId && messagesById[replyTargetId]) {
+    const target = messagesById[replyTargetId];
+    replyToUserId = target.userId;
+    replyToName = (getUserCache(target.userId) || {}).name || target.userId;
+  }
+
+  return sendMessageNotification(db, {
+    roomId: talkId,
+    roomTitle: titleEl ? titleEl.textContent : "",
+    memberIds: currentRoomMembers,
+    senderId: myUserId,
+    senderName: drawerUsername.textContent,
+    text,
+    replyToUserId,
+    replyToName
+  });
+}
+
 async function addMessage(talkId) {
   const message = messageInput.value.trim();
   messageAddButton.disabled = true;
@@ -1167,6 +1199,7 @@ async function addMessage(talkId) {
     await db.collection("KokoKengaku").doc(talkId).update({
       lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp() // これを追加！
     });
+    notifyRoom(message, replyToSnapshot); // ★ 新着通知（待たない）
     cancelReply(); // ★ 送信成功後は返信状態を解除
     clearMessageDraft(talkId); // ★ 送信成功後は下書きをリセット
   }
@@ -2115,6 +2148,7 @@ document.addEventListener("DOMContentLoaded", () => {
         lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
       });
 
+      notifyRoom(imageMessageInput.value || "📷 画像を送信しました"); // ★ 新着通知（待たない）
       console.log("画像送信が完了しました！");
 
       // d. 成功したら自動的にモーダルを閉じる
@@ -2281,6 +2315,7 @@ async function submitPoll() {
       lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
     });
 
+    notifyRoom("📊 " + question); // ★ 新着通知（待たない）
     pollCreateModal.classList.add("hidden");
     resetPollCreateForm();
     cancelReply(); // ★ 送信成功後は返信状態を解除
