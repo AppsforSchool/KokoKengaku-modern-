@@ -1,6 +1,9 @@
 // ★ OneSignalによるプッシュ通知の共通処理。talkScript.js / appScript.js から import して使う。
-//   APIキーは imgbb と同じく Firestore の system_keys/onesignal に保存する:
+//   APIキーは imgbb と同じく Firestore の system_keys/{KEY_DOC_ID} に保存する:
 //     { appId: "OneSignalのApp ID", restApiKey: "OneSignalのREST APIキー" }
+//   ★ サイトごとにOneSignalのアプリを分ける場合は、ここのドキュメントIDだけをサイトごとに変える
+//     （チャットサイト: "onesignal" / 問題投稿サイト: "onesignal_ProblemPosting"）
+const KEY_DOC_ID = "onesignal";
 
 let keysCache = null;
 let initPromise = null;
@@ -10,10 +13,10 @@ let initStep = "";         // 初期化のどの段階か（エラー表示用�
 
 async function loadKeys(db) {
   if (keysCache) return keysCache;
-  const snap = await db.collection("system_keys").doc("onesignal").get();
-  if (!snap.exists) throw new Error("Firestoreの system_keys/onesignal が見つかりません。");
+  const snap = await db.collection("system_keys").doc(KEY_DOC_ID).get();
+  if (!snap.exists) throw new Error(`Firestoreの system_keys/${KEY_DOC_ID} が見つかりません。`);
   const data = snap.data();
-  if (!data.appId || !data.restApiKey) throw new Error("system_keys/onesignal に appId / restApiKey がありません。");
+  if (!data.appId || !data.restApiKey) throw new Error(`system_keys/${KEY_DOC_ID} に appId / restApiKey がありません。`);
   keysCache = data;
   return keysCache;
 }
@@ -206,6 +209,43 @@ export function setupPushButton(buttonId) {
   });
 }
 
+// ★ OneSignalのREST APIで、指定したユーザーID宛に通知を1件送る（内部共通処理）
+async function postNotification({ appId, restApiKey, ids, title, body, url, topic }) {
+  const payload = {
+    app_id: appId,
+    target_channel: "push",
+    include_aliases: { external_id: ids },
+    headings: { en: title, ja: title },
+    contents: { en: body, ja: body },
+    url
+  };
+  if (topic) payload.web_push_topic = topic;   // 同じトピックの通知は最新1件にまとまる
+
+  const res = await fetch("https://api.onesignal.com/notifications", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json; charset=utf-8",
+      "Authorization": `Key ${restApiKey}`
+    },
+    body: JSON.stringify(payload)
+  });
+  if (!res.ok) console.warn("通知送信エラー:", res.status, await res.text());
+}
+
+// ★ 特定のユーザー宛に、任意のタイトル・本文で通知を送る（アンケート回答の通知など）。
+//   失敗しても呼び出し元の処理には影響させない
+export async function sendPushToUsers(db, { targetIds, title, body, url, topic }) {
+  try {
+    const ids = (targetIds || []).filter(Boolean);
+    if (ids.length === 0) return;
+    const { appId, restApiKey } = await loadKeys(db);
+    const absoluteUrl = new URL(url || "", location.href).href;
+    await postNotification({ appId, restApiKey, ids, title, body, url: absoluteUrl, topic });
+  } catch (e) {
+    console.warn("通知送信に失敗:", e);
+  }
+}
+
 // ★ 新着メッセージを、ルームのメンバー（送信者本人を除く）へ通知する。
 //   タイトル: 「トークルーム名|送信者名」
 //   本文    : 通常は「メッセージ内容」、返信なら「〇〇に返信しました－メッセージ内容」
@@ -232,25 +272,9 @@ export async function sendMessageNotification(db, { roomId, roomTitle, memberIds
       groups.push({ ids: targets, body: content });
     }
 
-    await Promise.all(groups.map(async (group) => {
-      const res = await fetch("https://api.onesignal.com/notifications", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json; charset=utf-8",
-          "Authorization": `Key ${restApiKey}`
-        },
-        body: JSON.stringify({
-          app_id: appId,
-          target_channel: "push",
-          include_aliases: { external_id: group.ids },
-          headings: { en: title, ja: title },
-          contents: { en: group.body, ja: group.body },
-          web_push_topic: roomId,   // 同じルームの通知は最新1件にまとまる
-          url
-        })
-      });
-      if (!res.ok) console.warn("通知送信エラー:", res.status, await res.text());
-    }));
+    await Promise.all(groups.map((group) =>
+      postNotification({ appId, restApiKey, ids: group.ids, title, body: group.body, url, topic: roomId })
+    ));
   } catch (e) {
     console.warn("通知送信に失敗（CORSの可能性あり）:", e);
   }
