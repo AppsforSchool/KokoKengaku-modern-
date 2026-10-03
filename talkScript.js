@@ -1,4 +1,4 @@
-import { initPush, logoutPush, setupPushButton, sendMessageNotification, sendPushToUsers } from "./notify.js";
+import { initPush, logoutPush, setupPushButton, sendMessageNotification, sendPushToUsers, sendProfileChangeNotification } from "./notify.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAqIiNj0N4WruPSOkWbeo5gxzsNyeMkuLo",
@@ -1178,29 +1178,17 @@ function notifyRoom(text, replyTargetId = replyToId) {
   });
 }
 
-// ★ アンケートに回答（または回答を変更）したことを、アンケートの作成者だけに通知する
-async function notifyPollAnswer(messageDocId, isChange) {
-  try {
-    // アンケートの作成者 = そのメッセージの投稿者
-    let creatorId = messagesById[messageDocId] && messagesById[messageDocId].userId;
-    if (!creatorId) {
-      const snap = await db.collection("KokoKengaku").doc(talkId).collection("talk").doc(messageDocId).get();
-      creatorId = snap.exists ? snap.data().userId : null;
-    }
-    if (!creatorId || creatorId === myUserId) return; // 自分のアンケートに自分で回答したときは通知しない
-
-    const titleEl = document.getElementById("talk-title");
-    const roomTitle = titleEl ? titleEl.textContent : "";
-    const name = drawerUsername.textContent;
-    await sendPushToUsers(db, {
-      targetIds: [creatorId],
-      title: `${roomTitle}|${name}`,
-      body: isChange ? `${name}がアンケートの回答を変更しました` : `${name}がアンケートに回答しました`,
-      url: `talk.html?id=${encodeURIComponent(talkId)}`
-    });
-  } catch (e) {
-    console.warn("アンケート回答の通知に失敗:", e);
-  }
+// ★ アンケートに回答（または回答を変更）したことを、トークルームの全メンバー（本人を除く）に通知する
+function notifyPollAnswer(isChange) {
+  const titleEl = document.getElementById("talk-title");
+  const roomTitle = titleEl ? titleEl.textContent : "";
+  const name = drawerUsername.textContent;
+  return sendPushToUsers(db, {
+    targetIds: (currentRoomMembers || []).filter((id) => id && id !== myUserId),
+    title: `${roomTitle}|${name}`,
+    body: isChange ? `${name}がアンケートの回答を変更しました` : `${name}がアンケートに回答しました`,
+    url: `talk.html?id=${encodeURIComponent(talkId)}`
+  });
 }
 
 async function addMessage(talkId) {
@@ -1998,6 +1986,7 @@ async function handleProfileEditOrSave() {
       profileName.classList.toggle("admin", !!updated.isAdmin);
       profileName.classList.toggle("prize", !updated.isAdmin && hasActivePrize(updated));
 
+      sendProfileChangeNotification(db, { senderId: myUserId, userName: newName }); // ★ 全員へ通知（待たない）
       resetProfileEditMode();
       await AppDialog.alert("プロフィールを保存しました。");
     } catch (error) {
@@ -2420,7 +2409,7 @@ function buildPollWidget(messageDocId, choices, answerMap) {
       await db.collection("KokoKengaku").doc(talkId).collection("talk").doc(messageDocId).update({
         [`answer.${myUserId}`]: selectedIndex
       });
-      notifyPollAnswer(messageDocId, hasMyAnswer); // ★ 作成者へ通知（待たない）。再回答なら「変更しました」
+      notifyPollAnswer(hasMyAnswer); // ★ 全メンバーへ通知（待たない）。再回答なら「変更しました」
     } catch (error) {
       console.error("回答の送信に失敗しました:", error);
       await AppDialog.alert("回答の送信に失敗しました。\n" + error.message);

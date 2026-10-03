@@ -1,4 +1,4 @@
-import { initPush, logoutPush, setupPushButton } from "./notify.js";
+import { initPush, logoutPush, setupPushButton, sendProfileChangeNotification } from "./notify.js";
 
 const firebaseConfig = {
   apiKey: "AIzaSyAqIiNj0N4WruPSOkWbeo5gxzsNyeMkuLo",
@@ -425,6 +425,7 @@ async function handleProfileEditOrSave() {
       profileName.classList.toggle("admin", !!updated.isAdmin);
       profileName.classList.toggle("prize", !updated.isAdmin && hasActivePrize(updated));
 
+      sendProfileChangeNotification(db, { senderId: myUserId, userName: newName }); // ★ 全員へ通知（待たない）
       resetProfileEditMode();
       await AppDialog.alert("プロフィールを保存しました。");
     } catch (error) {

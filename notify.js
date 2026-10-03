@@ -246,6 +246,27 @@ export async function sendPushToUsers(db, { targetIds, title, body, url, topic }
   }
 }
 
+// ★ プロフィールを変更したことを、サイトの全ユーザー（変更した本人は除く）へ通知する。
+//   宛先は Firestore の users_random コレクションの全ドキュメントID（isActive が false の人は除く）。
+//   失敗しても呼び出し元の処理には影響させない
+export async function sendProfileChangeNotification(db, { senderId, userName }) {
+  try {
+    const snapshot = await db.collection("users_random").get();
+    const ids = snapshot.docs
+      .filter((doc) => (doc.data() || {}).isActive !== false)
+      .map((doc) => doc.id)
+      .filter((id) => id !== senderId);
+    await sendPushToUsers(db, {
+      targetIds: ids,
+      title: "プロフィール変更",
+      body: `${userName}がプロフィールを変更しました`,
+      url: "app.html"
+    });
+  } catch (e) {
+    console.warn("プロフィール変更の通知に失敗:", e);
+  }
+}
+
 // ★ 新着メッセージを、ルームのメンバー（送信者本人を除く）へ通知する。
 //   タイトル: 「トークルーム名|送信者名」
 //   本文    : 通常は「メッセージ内容」、返信なら「〇〇に返信しました－メッセージ内容」
