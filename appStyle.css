@@ -1368,3 +1368,101 @@ footer p {
     width: 80%;
   }
 }
+
+
+/* ================================
+   ★ 個人 / グループ 切替UI（iOS風セグメントコントロール）
+   ================================ */
+.segmented-control {
+  position: relative;
+  display: flex;
+  width: 100%;
+  max-width: 560px;
+  margin: 0 auto 1.25rem;
+  padding: 4px;
+  box-sizing: border-box;
+  background-color: #e4e5ea;
+  border-radius: var(--radius-full);
+}
+.segmented-thumb {
+  position: absolute;
+  top: 4px;
+  bottom: 4px;
+  left: 4px;
+  width: calc(50% - 4px);
+  background-color: var(--surface);
+  border-radius: var(--radius-full);
+  box-shadow: 0 2px 8px rgba(20, 30, 40, 0.14);
+  transition: transform 0.28s var(--ease);
+  pointer-events: none;
+}
+.segmented-control[data-active="group"] .segmented-thumb {
+  transform: translateX(100%);
+}
+.segmented-item {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.4rem;
+  padding: 0.65rem 0.5rem;
+  font-family: "BIZ UDGothic", sans-serif;
+  font-weight: 700;
+  font-size: 1rem;
+  color: var(--text);
+  background: none;
+  border: none;
+  border-radius: var(--radius-full);
+  cursor: pointer;
+  transition: color 0.2s var(--ease);
+}
+.segmented-item.active {
+  color: var(--primary);
+}
+.tab-badge {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: var(--radius-full);
+  background-color: #ff3b30;
+  flex-shrink: 0;
+}
+.tab-badge.hidden {
+  display: none;
+}
+
+.talk-list-area.hidden {
+  display: none;
+}
+
+/* --- 一覧カードのアイコン + 名前 --- */
+.talk-button .avatar-circle {
+  width: 2.8rem;
+  height: 2.8rem;
+  min-width: 2.8rem;
+  font-size: 1.1rem;
+}
+.talk-button .title {
+  flex: 1;
+  min-width: 0;
+}
+.talk-button .talk-sub {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+.talk-button.no-room {
+  background-color: var(--surface);
+}
+.talk-button.no-room .new-message {
+  color: var(--text-muted);
+  font-weight: 400;
+  font-size: 0.78rem;
+}
+.talk-list-empty {
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  padding: 1rem 0;
+}

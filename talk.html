@@ -49,6 +49,16 @@
         <span id="member-modal-close" class="close-button">&times;</span>
       </div>
       
+      <!-- グループアイコンの変更（管理者 かつ グループのときだけ表示） -->
+      <div id="group-icon-area" class="hidden">
+        <div id="group-icon-holder"></div>
+        <input type="file" id="group-icon-input" accept="image/*" class="visually-hidden-input">
+        <div class="group-icon-buttons">
+          <button id="group-icon-change-button" class="secondary-button" type="button">グループアイコンを変更</button>
+          <button id="group-icon-remove-button" class="secondary-button hidden" type="button">画像を削除</button>
+        </div>
+      </div>
+
       <div id="member-area">
         
       </div>
@@ -222,6 +232,7 @@
       <p id="selection-title">My Talk</p>
       <div id="head-area">
         <button id="to-home-button">←ホームへもどる</button>
+        <div id="talk-title-avatar"></div>
         <p id="talk-title">loading...</p>
         <p id="select-mode-button">選択</p>
         <p id="member-button">メンバー</p>

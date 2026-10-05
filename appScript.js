@@ -600,6 +600,310 @@ function hideLoadingOverlayNowForAppList() {
   }
 }
 
+// ================================
+// ★ 個人 / グループ の分類
+//    メンバー1人 = 自分のみのトーク / 2人 = 個人トーク / 3人以上 = グループ
+//    （内部的にはどれも KokoKengaku のルーム。人数だけで分類する）
+// ================================
+const TALK_TAB_STORAGE_KEY = "kokoKengakuTalkTab";
+let currentTalkTab = "personal";
+let allUsersList = [];      // 個人タブに並べる全ユーザー（isActive が false の人は除く）
+let roomMetaMap = {};       // roomId -> { category, partnerId, title, imageUrl, lastUpdatedAtMs }
+let unreadCountCache = {};  // roomId -> 未読件数（タブの赤丸・一覧の再描画に使う）
+let personalButtonArea;
+let groupArea;
+let talkTabControl;
+let isCreatingPersonalTalk = false;
+
+function getRoomCategory(members) {
+  const count = (members || []).length;
+  if (count <= 1) return "self";
+  if (count === 2) return "personal";
+  return "group";
+}
+
+// ★ この端末のユーザーに見せてよいルームか。
+//   自分が入っていれば表示。管理者は、自分が入っていなくてもグループ(3人以上)だけ閲覧できる
+//   （他人同士の個人トークは管理者でも表示しない）
+function isRoomVisibleForMe(roomData) {
+  const members = roomData.members || [];
+  if (members.includes(myUserId)) return true;
+  return meIsAdmin && members.length >= 3;
+}
+
+function getUserDisplayName(userId) {
+  const cached = getUserCache(userId);
+  return (cached && cached.name) || userId;
+}
+
+// ★ 個人タブ用に全ユーザーを読み込む（名前・アイコンはユーザーキャッシュにも反映する）
+async function loadAllUsers() {
+  try {
+    const snapshot = await db.collection("users_random").get();
+    allUsersList = snapshot.docs.map((doc) => {
+      const d = doc.data() || {};
+      setUserCache(doc.id, {
+        name: d.name || doc.id,
+        isAdmin: !!d.isAdmin,
+        imageUrl: d.imageUrl || "",
+        prizeGrantedAt: d.prizeGrantedAt
+      });
+      return {
+        userId: doc.id,
+        name: d.name || doc.id,
+        isActive: d.isActive !== false,
+        no: typeof d.no === "number" ? d.no : Infinity
+      };
+    }).filter((u) => u.isActive).sort((a, b) => a.no - b.no);
+
+    // グループ作成モーダルのメンバー選択にも使い回す（自分は自動追加なので除く）
+    allUsersCache = allUsersList.filter((u) => u.userId !== myUserId);
+  } catch (error) {
+    console.error("ユーザー一覧の取得エラー:", error);
+  }
+}
+
+// ---- 切替UI ----
+function setTalkTab(tab) {
+  currentTalkTab = tab === "group" ? "group" : "personal";
+  if (talkTabControl) {
+    talkTabControl.dataset.active = currentTalkTab;
+    talkTabControl.querySelectorAll(".segmented-item").forEach((btn) => {
+      btn.classList.toggle("active", btn.dataset.tab === currentTalkTab);
+    });
+  }
+  if (personalButtonArea) personalButtonArea.classList.toggle("hidden", currentTalkTab !== "personal");
+  if (groupArea) groupArea.classList.toggle("hidden", currentTalkTab !== "group");
+  try { localStorage.setItem(TALK_TAB_STORAGE_KEY, currentTalkTab); } catch (e) { /* 保存できなくても問題なし */ }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  talkTabControl = document.getElementById("talk-tab-control");
+  personalButtonArea = document.getElementById("personal-button-area");
+  groupArea = document.getElementById("group-area");
+
+  talkTabControl.querySelectorAll(".segmented-item").forEach((btn) => {
+    btn.addEventListener("click", () => setTalkTab(btn.dataset.tab));
+  });
+
+  let saved = "personal";
+  try { saved = localStorage.getItem(TALK_TAB_STORAGE_KEY) || "personal"; } catch (e) { /* 無視 */ }
+  setTalkTab(saved);
+});
+
+// ★ 各タブに、未読があれば赤丸を出す
+function updateTabBadges() {
+  let hasPersonalUnread = false;
+  let hasGroupUnread = false;
+  Object.keys(unreadCountCache).forEach((roomId) => {
+    const meta = roomMetaMap[roomId];
+    if (!meta || !(unreadCountCache[roomId] > 0)) return;
+    if (meta.category === "group") hasGroupUnread = true;
+    else hasPersonalUnread = true;
+  });
+  if (!talkTabControl) return;
+  const personalBadge = talkTabControl.querySelector('[data-tab="personal"] .tab-badge');
+  const groupBadge = talkTabControl.querySelector('[data-tab="group"] .tab-badge');
+  if (personalBadge) personalBadge.classList.toggle("hidden", !hasPersonalUnread);
+  if (groupBadge) groupBadge.classList.toggle("hidden", !hasGroupUnread);
+}
+
+// ★ 未読件数の表示を、要素に反映する
+function applyUnreadToElement(element, count) {
+  element.textContent = `新着: ${count}件`;
+  element.classList.toggle("no-message", count === 0);
+}
+
+// ---- 個人タブ ----
+// ★ 個人タブ全体を作り直す。自分(メモ) → トークしたことのある相手(新しい順) → まだの相手、の順
+function renderPersonalList() {
+  if (!personalButtonArea) return;
+  personalButtonArea.innerHTML = "";
+
+  // 相手ごとに、いちばん新しいルームを1つ選ぶ
+  const roomByPartner = {};
+  Object.keys(roomMetaMap).forEach((roomId) => {
+    const meta = roomMetaMap[roomId];
+    if (meta.category === "group") return;
+    const current = roomByPartner[meta.partnerId];
+    if (!current || meta.lastUpdatedAtMs > current.lastUpdatedAtMs) {
+      roomByPartner[meta.partnerId] = Object.assign({ roomId }, meta);
+    }
+  });
+
+  const knownIds = new Set(allUsersList.map((u) => u.userId));
+  const people = allUsersList.map((u) => ({ userId: u.userId, name: u.name }));
+  // 一覧に居ない相手（停止中など）でもルームがあれば表示できるようにする
+  Object.keys(roomByPartner).forEach((partnerId) => {
+    if (!knownIds.has(partnerId)) people.push({ userId: partnerId, name: getUserDisplayName(partnerId) });
+  });
+  if (!knownIds.has(myUserId) && !people.some((u) => u.userId === myUserId)) {
+    people.unshift({ userId: myUserId, name: getUserDisplayName(myUserId) });
+  }
+
+  // 1) 自分だけのトーク
+  const me = people.find((u) => u.userId === myUserId);
+  personalButtonArea.appendChild(createPersonalButton(me, roomByPartner[myUserId] || null, true));
+
+  // 2) トークしたことのある相手（更新が新しい順、「今日」「昨日」の見出し付き）
+  const withRoom = people
+    .filter((u) => u.userId !== myUserId && roomByPartner[u.userId])
+    .sort((a, b) => roomByPartner[b.userId].lastUpdatedAtMs - roomByPartner[a.userId].lastUpdatedAtMs);
+  let currentLabel = null;
+  withRoom.forEach((u) => {
+    const room = roomByPartner[u.userId];
+    const label = getDateGroupLabel(room.lastUpdatedAtMs);
+    if (label !== currentLabel) {
+      const header = document.createElement("p");
+      header.classList.add("talk-group-header");
+      header.textContent = label;
+      personalButtonArea.appendChild(header);
+      currentLabel = label;
+    }
+    personalButtonArea.appendChild(createPersonalButton(u, room, false));
+  });
+
+  // 3) まだトークしていない相手
+  const withoutRoom = people.filter((u) => u.userId !== myUserId && !roomByPartner[u.userId]);
+  if (withoutRoom.length > 0) {
+    const header = document.createElement("p");
+    header.classList.add("talk-group-header");
+    header.textContent = "まだトークしていない人";
+    personalButtonArea.appendChild(header);
+    withoutRoom.forEach((u) => {
+      personalButtonArea.appendChild(createPersonalButton(u, null, false));
+    });
+  }
+}
+
+function createPersonalButton(user, room, isSelf) {
+  const cached = getUserCache(user.userId) || {};
+  const displayName = cached.name || user.name || user.userId;
+
+  const talkButton = document.createElement("div");
+  talkButton.classList.add("talk-button");
+  if (!room) talkButton.classList.add("no-room");
+
+  talkButton.appendChild(createAvatar(displayName, undefined, cached.imageUrl || ""));
+
+  const titleArea = document.createElement("p");
+  titleArea.classList.add("title");
+  titleArea.textContent = isSelf ? `${displayName}（自分）` : displayName;
+  talkButton.appendChild(titleArea);
+
+  const rightArea = document.createElement("p");
+  rightArea.classList.add("new-message");
+  if (room) {
+    rightArea.id = `unread-${room.roomId}`;
+    if (typeof unreadCountCache[room.roomId] === "number") {
+      applyUnreadToElement(rightArea, unreadCountCache[room.roomId]);
+    } else {
+      rightArea.textContent = "取得中...";
+    }
+    talkButton.id = `room-${room.roomId}`;
+    talkButton.addEventListener("click", () => {
+      window.location.href = `./talk.html?id=${room.roomId}`;
+    });
+  } else {
+    rightArea.textContent = "トークを始める";
+    talkButton.addEventListener("click", () => startPersonalTalk(user, isSelf));
+  }
+  talkButton.appendChild(rightArea);
+  return talkButton;
+}
+
+// ★ まだトークしていない相手を押したとき：確認してから新しい個人トークを作る
+async function startPersonalTalk(user, isSelf) {
+  if (isCreatingPersonalTalk) return;
+  const displayName = getUserDisplayName(user.userId);
+  const message = isSelf
+    ? "自分だけのトークを開始しますか？"
+    : `"${displayName}"とのトークを開始しますか？`;
+  const ok = await AppDialog.confirm(message, { okText: "開始する" });
+  if (!ok) return;
+
+  isCreatingPersonalTalk = true;
+  try {
+    // ルームIDは2人のIDから一意に決める（同時に押されても同じルームになり、二重作成を防げる）
+    const roomId = isSelf
+      ? `dm_${myUserId}`
+      : `dm_${[myUserId, user.userId].sort().join("__")}`;
+    const members = isSelf ? [myUserId] : [myUserId, user.userId];
+    await db.collection("KokoKengaku").doc(roomId).set({
+      // 個人トークの表示名は相手の名前から動的に決めるので、title は管理者画面などでの予備
+      title: isSelf ? `${getUserDisplayName(myUserId)}（自分）` : `${getUserDisplayName(myUserId)}と${displayName}`,
+      members: members,
+      lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    });
+    window.location.href = `./talk.html?id=${roomId}`;
+  } catch (error) {
+    console.error("個人トークの作成エラー:", error);
+    isCreatingPersonalTalk = false;
+    await AppDialog.alert("トークを開始できませんでした。\n" + (error.message || String(error)));
+  }
+}
+
+// ---- グループタブ ----
+function createGroupButton(roomId, roomData) {
+  const talkButton = document.createElement("div");
+  talkButton.classList.add("talk-button");
+  talkButton.id = `room-${roomId}`;
+  talkButton.dataUpdatedAt = roomData.lastUpdatedAt;
+  talkButton.addEventListener("click", () => {
+    window.location.href = `./talk.html?id=${roomId}`;
+  });
+
+  talkButton.appendChild(createAvatar(roomData.title, undefined, roomData.imageUrl || ""));
+  talkButton.dataset.avatarKey = `${roomData.title}|${roomData.imageUrl || ""}`;
+
+  const titleArea = document.createElement("p");
+  titleArea.classList.add("title");
+  titleArea.textContent = roomData.title;
+
+  const newMessageArea = document.createElement("p");
+  newMessageArea.classList.add("new-message");
+  newMessageArea.id = `unread-${roomId}`;
+  if (typeof unreadCountCache[roomId] === "number") {
+    applyUnreadToElement(newMessageArea, unreadCountCache[roomId]);
+  } else {
+    newMessageArea.textContent = "取得中...";
+  }
+
+  talkButton.appendChild(titleArea);
+  talkButton.appendChild(newMessageArea);
+  return talkButton;
+}
+
+function updateGroupButton(talkButton, roomData) {
+  const titleArea = talkButton.querySelector(".title");
+  if (titleArea) titleArea.textContent = roomData.title;
+  talkButton.dataUpdatedAt = roomData.lastUpdatedAt;
+
+  // グループ名・アイコンが変わったときだけアイコンを作り直す
+  const avatarKey = `${roomData.title}|${roomData.imageUrl || ""}`;
+  if (talkButton.dataset.avatarKey !== avatarKey) {
+    const oldAvatar = talkButton.querySelector(".avatar-circle");
+    const newAvatar = createAvatar(roomData.title, undefined, roomData.imageUrl || "");
+    if (oldAvatar) oldAvatar.replaceWith(newAvatar);
+    else talkButton.prepend(newAvatar);
+    talkButton.dataset.avatarKey = avatarKey;
+  }
+}
+
+function updateGroupEmptyText(talkButtonArea) {
+  const hasButton = !!talkButtonArea.querySelector(".talk-button");
+  let emptyText = document.getElementById("group-empty-text");
+  if (hasButton) {
+    if (emptyText) emptyText.remove();
+  } else if (!emptyText) {
+    emptyText = document.createElement("p");
+    emptyText.id = "group-empty-text";
+    emptyText.classList.add("talk-list-empty");
+    emptyText.textContent = "グループトークはまだありません。";
+    talkButtonArea.appendChild(emptyText);
+  }
+}
+
 async function getAllTalkData() {
   const talkButtonArea = document.getElementById("talk-button-area");
   const talkButtonLoading = document.getElementById("talk-button-loading");
@@ -616,13 +920,19 @@ async function getAllTalkData() {
     //   これを待たずにルーム一覧の表示を始めると、一瞬「全部未読」→実際の数値、という
     //   表示のチラつきが起きてしまうため、最初の描画より前に確定させる。
     if (isInitialTalkListLoad) {
-      setLoadingStage("最終確認情報を読み込んでいます...", 20);
+      setLoadingStage("最終確認情報を読み込んでいます...", 15);
     }
     const initialUserSnapshot = await db.collection("users_random").doc(myUserId).get();
     currentUserLastCheckedMap = (initialUserSnapshot.data() || {}).lastChecked || {};
   } catch (error) {
     console.error("最終確認情報の初期取得エラー:", error);
   }
+
+  // ★ 個人タブに並べる全ユーザーを読み込む
+  if (isInitialTalkListLoad) {
+    setLoadingStage("ユーザー情報を読み込んでいます...", 25);
+  }
+  await loadAllUsers();
 
   // ★ 以降のlastChecked変更は、トーク一覧の更新とは独立してリアルタイム監視する
   userDocUnsubscribeForUnread = db.collection("users_random").doc(myUserId)
@@ -639,7 +949,7 @@ async function getAllTalkData() {
     });
 
   if (isInitialTalkListLoad) {
-    setLoadingStage("トークルーム情報を読み込んでいます...", 30);
+    setLoadingStage("トークルーム情報を読み込んでいます...", 35);
   }
 
   try {
@@ -660,85 +970,92 @@ async function getAllTalkData() {
         const changes = talkSnapshot.docChanges();
         const totalChanges = changes.length;
         let processedChanges = 0;
+        let personalDirty = false;          // 個人タブを作り直す必要があるか
+        const roomsToRefreshUnread = [];    // 未読数を数え直すルーム
         // ★ 初回表示時のみ、各ルームの未読数計算が完了するのを待ってからオーバーレイを閉じる
         const unreadCountPromises = [];
+
+        // ルームを一覧から外す共通処理
+        const removeRoomFromLists = (roomId) => {
+          const prevMeta = roomMetaMap[roomId];
+          if (prevMeta && prevMeta.category !== "group") personalDirty = true;
+          delete roomMetaMap[roomId];
+          delete unreadCountCache[roomId];
+          renderedRoomIds.delete(roomId);
+          const groupButton = talkButtonArea.querySelector(`#room-${CSS.escape(roomId)}`);
+          if (groupButton) groupButton.remove();
+        };
 
         // 変化（追加・修正・削除）があった差分だけをループ処理する
         changes.forEach((change) => {
           processedChanges++;
           if (isThisInitialLoad && totalChanges > 0) {
             const percent = Math.round((processedChanges / totalChanges) * 100);
-            // ★ このステージは進捗バー全体の30%〜75%の区間にマッピングする
-            setLoadingStage(`トーク一覧を読み込んでいます (${percent}%)`, 30 + (percent / 100) * 45);
+            // ★ このステージは進捗バー全体の35%〜75%の区間にマッピングする
+            setLoadingStage(`トーク一覧を読み込んでいます (${percent}%)`, 35 + (percent / 100) * 40);
           }
 
           const talkDoc = change.doc;
           const roomId = talkDoc.id;
           const roomData = talkDoc.data();
-          
-          // 1. 新しくルームが追加された、または初回読み込みの場合
-          if (change.type === "added") {
-            // すでに同じIDのボタンが画面にあれば作成しない（重複防止）
-            if (document.getElementById(`room-${roomId}`)) return;
-            renderedRoomIds.add(roomId);
 
-            const talkButton = document.createElement("div");
-            talkButton.classList.add("talk-button");
-            talkButton.id = `room-${roomId}`; // 部屋ごとのIDを付与
-            talkButton.dataUpdatedAt = roomData.lastUpdatedAt; // 更新日時を記憶させておく
-            talkButton.addEventListener("click", () => {
-              window.location.href = `./talk.html?id=${roomId}`;
-            });
-
-            const titleArea = document.createElement("p");
-            titleArea.classList.add("title");
-            titleArea.textContent = roomData.title;
-            
-            // 未読数を入れる器（pタグ）をID付きで作っておく
-            const newMessageArea = document.createElement("p");
-            newMessageArea.classList.add("new-message");
-            newMessageArea.id = `unread-${roomId}`;
-            newMessageArea.textContent = "取得中...";
-
-            talkButton.appendChild(titleArea);
-            talkButton.appendChild(newMessageArea);
-            talkButtonArea.appendChild(talkButton); // 画面に直接追加
-
-            // ★ 追加した直後に、グループ見出しつきで並び替える
-            regroupTalkButtons(talkButtonArea);
-
-            // この部屋の未読数を計算して書き換える
-            const unreadPromise = updateSingleRoomUnread(roomId, currentUserLastCheckedMap[roomId]);
-            if (isThisInitialLoad) unreadCountPromises.push(unreadPromise);
+          // 削除された、または(メンバー変更などで)自分に見せないルームになった場合
+          if (change.type === "removed" || !isRoomVisibleForMe(roomData)) {
+            removeRoomFromLists(roomId);
+            return;
           }
-          
-          // 2. メッセージが届くなどして、ルームの情報が更新された場合
-          if (change.type === "modified") {
-            const talkButton = document.getElementById(`room-${roomId}`);
-            if (talkButton) {
-              // タイトルが変わっていれば更新（必要なければ消してもOKです）
-              const titleArea = talkButton.querySelector(".title");
-              if (titleArea) titleArea.textContent = roomData.title;
 
-              // ★ 更新日時を最新化して、グループ・並び順に反映させる
-              talkButton.dataUpdatedAt = roomData.lastUpdatedAt;
-              regroupTalkButtons(talkButtonArea);
+          const members = roomData.members || [];
+          const category = getRoomCategory(members);
+          const prevMeta = roomMetaMap[roomId];
 
-              // ★ ここがポイント：未読数だけをピンポイントで数え直して更新する
-              const unreadPromise = updateSingleRoomUnread(roomId, currentUserLastCheckedMap[roomId]);
-              if (isThisInitialLoad) unreadCountPromises.push(unreadPromise);
+          const lastUpdatedMs = toMillisOrNull(roomData.lastUpdatedAt)
+            || (talkDoc.metadata.hasPendingWrites ? Date.now() : 0);
+          roomMetaMap[roomId] = {
+            category: category,
+            partnerId: category === "group" ? "" : (members.find((id) => id !== myUserId) || myUserId),
+            title: roomData.title || "",
+            imageUrl: roomData.imageUrl || "",
+            lastUpdatedAtMs: lastUpdatedMs
+          };
+          renderedRoomIds.add(roomId);
+
+          if (category === "group") {
+            // 個人 → グループに変わった場合は、個人タブ側から外す
+            if (prevMeta && prevMeta.category !== "group") personalDirty = true;
+
+            const existingButton = document.getElementById(`room-${roomId}`);
+            if (existingButton && talkButtonArea.contains(existingButton)) {
+              updateGroupButton(existingButton, roomData);
+            } else {
+              talkButtonArea.appendChild(createGroupButton(roomId, roomData));
             }
+            regroupTalkButtons(talkButtonArea);
+          } else {
+            // グループ → 個人に変わった場合は、グループ側から外す
+            if (prevMeta && prevMeta.category === "group") {
+              const oldButton = talkButtonArea.querySelector(`#room-${CSS.escape(roomId)}`);
+              if (oldButton) oldButton.remove();
+            }
+            personalDirty = true;
           }
 
-          // 3. ルーム自体が削除された場合
-          if (change.type === "removed") {
-            renderedRoomIds.delete(roomId);
-            const talkButton = document.getElementById(`room-${roomId}`);
-            if (talkButton) talkButton.remove();
-            // ★ 削除後、空になったグループの見出しが残らないよう整理し直す
-            regroupTalkButtons(talkButtonArea);
-          }
+          roomsToRefreshUnread.push(roomId);
         });
+
+        // 個人タブは、変化があったときに作り直す（未読数はキャッシュから復元される）
+        if (personalDirty || isThisInitialLoad) {
+          renderPersonalList();
+        }
+        regroupTalkButtons(talkButtonArea);
+        updateGroupEmptyText(talkButtonArea);
+
+        // ★ 未読数をピンポイントで数え直して更新する
+        roomsToRefreshUnread.forEach((roomId) => {
+          const unreadPromise = updateSingleRoomUnread(roomId, currentUserLastCheckedMap[roomId]);
+          if (isThisInitialLoad) unreadCountPromises.push(unreadPromise);
+        });
+        updateTabBadges();
 
         // 初回のローディング非表示処理
         talkButtonLoading.classList.add("hidden");
@@ -785,8 +1102,7 @@ async function getAllTalkData() {
 
 // ★ 特定の1部屋だけ未読数を数え直して画面を書き換える関数
 async function updateSingleRoomUnread(roomId, lastCheckedTimestamp) {
-  const newMessageArea = document.getElementById(`unread-${roomId}`);
-  if (!newMessageArea) return;
+  if (!document.getElementById(`unread-${roomId}`)) return;
 
   const lastCheckedTime = lastCheckedTimestamp ? lastCheckedTimestamp.toDate() : new Date(0);
   const baseQuery = db.collection("KokoKengaku")
@@ -799,7 +1115,6 @@ async function updateSingleRoomUnread(roomId, lastCheckedTimestamp) {
   try {
     // ★ 該当メッセージを全部ダウンロードしてから件数を数えるのではなく、
     //   Firestoreの集計クエリ(count())で「件数だけ」をサーバー側で数えてもらう。
-    //   本文・画像URLなどのフルドキュメントを転送しないため、大幅に軽量。
     const unreadSnapshot = await baseQuery.count().get();
     unreadCount = unreadSnapshot.data().count;
   } catch (countError) {
@@ -810,20 +1125,19 @@ async function updateSingleRoomUnread(roomId, lastCheckedTimestamp) {
       const fallbackSnapshot = await baseQuery.get();
       unreadCount = fallbackSnapshot.size;
     } catch (fallbackError) {
-      // ★ どちらも失敗した場合は「取得中...」のまま止まらないよう、エラー状態を明示する
       console.error(`未読数の取得に失敗 [Room: ${roomId}]:`, fallbackError);
-      newMessageArea.textContent = "取得失敗";
+      // 待っている間に画面が作り直されている場合があるので、要素は取り直す
+      const failedArea = document.getElementById(`unread-${roomId}`);
+      if (failedArea) failedArea.textContent = "取得失敗";
       return;
     }
   }
 
-  // テキストとクラス（見た目）をピンポイントで更新
-  newMessageArea.textContent = `新着: ${unreadCount}件`;
-  if (unreadCount === 0) {
-    newMessageArea.classList.add("no-message");
-  } else {
-    newMessageArea.classList.remove("no-message");
-  }
+  unreadCountCache[roomId] = unreadCount;
+  // ★ 待っている間に個人タブが作り直されていることがあるので、ここで要素を取り直す
+  const newMessageArea = document.getElementById(`unread-${roomId}`);
+  if (newMessageArea) applyUnreadToElement(newMessageArea, unreadCount);
+  updateTabBadges();
 }
 
 
@@ -878,9 +1192,13 @@ document.addEventListener("DOMContentLoaded", () => {
 
   createTalkMemberSearch.addEventListener("input", () => {
     renderCreateTalkMemberList(createTalkMemberSearch.value.trim());
+    updateCreateTalkSubmitState();
   });
 
   createTalkSubmitButton.addEventListener("click", handleCreateTalk);
+
+  // ★ チェックの増減でも作成ボタンの有効/無効を更新する
+  createTalkMemberList.addEventListener("change", updateCreateTalkSubmitState);
 });
 
 // ★「＋ 新しいトークを作成」ボタンから呼ばれる：モーダルを開いてユーザー一覧を読み込む
@@ -891,7 +1209,9 @@ async function openCreateTalkModal() {
   updateCreateTalkSubmitState();
 
   if (allUsersCache) {
+    createTalkMemberLoading.classList.add("hidden");
     renderCreateTalkMemberList("");
+    updateCreateTalkSubmitState();
     return;
   }
 
@@ -963,7 +1283,11 @@ function renderCreateTalkMemberList(filterText) {
 // ★ タイトルが空でなければ作成ボタンを有効化する
 function updateCreateTalkSubmitState() {
   const hasTitle = createTalkTitleInput && createTalkTitleInput.value.trim() !== "";
-  createTalkSubmitButton.disabled = !hasTitle;
+  // ★ グループは3人以上なので、自分以外を2人以上選ぶ必要がある
+  const selectedCount = createTalkMemberList
+    ? createTalkMemberList.querySelectorAll("input[type=checkbox]:checked").length
+    : 0;
+  createTalkSubmitButton.disabled = !(hasTitle && selectedCount >= 2);
 }
 
 // ★ 実際にKokoKengakuへ新しいルームを作成する
@@ -974,6 +1298,7 @@ async function handleCreateTalk() {
   const selectedMemberIds = Array.from(
     createTalkMemberList.querySelectorAll("input[type=checkbox]:checked")
   ).map((cb) => cb.value);
+  if (selectedMemberIds.length < 2) return; // グループは3人以上（自分＋2人以上）
 
   // ★ 自分（作成者）は必ずメンバーに含める
   const members = Array.from(new Set([...selectedMemberIds, myUserId]));

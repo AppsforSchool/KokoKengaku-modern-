@@ -280,7 +280,9 @@ export async function sendMessageNotification(db, { roomId, roomTitle, memberIds
     const { appId, restApiKey } = await loadKeys(db);
     const content = (text || "").replace(/\s+/g, " ").trim().slice(0, 80) || "メッセージが届きました";
     const url = new URL(`talk.html?id=${encodeURIComponent(roomId)}`, location.href).href;
-    const title = `${roomTitle || ""}|${senderName || "不明なユーザー"}`;
+    const title = roomTitle
+      ? `${roomTitle}|${senderName || "不明なユーザー"}`
+      : (senderName || "不明なユーザー");   // ★ 個人トークはルーム名が無いので送信者名だけ
 
     // 宛先ごとの本文を決める（返信先の本人だけ「あなたに」になる）
     const groups = []; // { ids: [...], body: "..." }

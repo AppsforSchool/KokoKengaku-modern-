@@ -119,6 +119,8 @@ let initialLastCheckedDate = null;
 // ★ 未読区切り線を挿入する対象メッセージID。初回表示時に一度だけ決定して固定する
 //   （これにより、その後に自分や他人が新しく送ったメッセージの前には出なくなる）
 let unreadDividerBeforeMessageId = null;
+let currentRoomIsGroup = false;   // ★ メンバー3人以上ならグループ（2人以下は個人トーク扱い）
+let currentRoomImageUrl = "";     // ★ グループアイコンの画像URL
 let currentRoomMembers = [];   // ★ 現在のルームのメンバーIDリストを保持する変数を追加
 
 // ★ メッセージ一覧を差分更新（docChanges）で描画するための永続状態
@@ -578,6 +580,42 @@ async function waitForImagesThenHideOverlay(images) {
   }
 }
 
+// ★ トーク画面上部のタイトル＋アイコンを決める。
+//   個人トーク(メンバー2人以下)は「相手の名前とアイコン」、グループは「グループ名とグループアイコン」
+function applyRoomHeader(roomData) {
+  const talkTitle = document.getElementById("talk-title");
+  const avatarHolder = document.getElementById("talk-title-avatar");
+  const members = roomData.members || currentRoomMembers || [];
+  currentRoomIsGroup = members.length >= 3;
+  currentRoomImageUrl = roomData.imageUrl || "";
+
+  let name;
+  let imageUrl;
+  if (currentRoomIsGroup) {
+    name = roomData.title || "";
+    imageUrl = currentRoomImageUrl;
+  } else {
+    const partnerId = members.find((id) => id !== myUserId) || myUserId;
+    const cached = getUserCache(partnerId) || {};
+    name = cached.name || partnerId;
+    imageUrl = cached.imageUrl || "";
+    if (partnerId === myUserId) name = `${name}（自分）`;
+  }
+
+  talkTitle.textContent = name;
+  if (avatarHolder) {
+    avatarHolder.innerHTML = "";
+    avatarHolder.appendChild(createAvatar(name, undefined, imageUrl));
+  }
+}
+
+// ★ 通知タイトルに使うルーム名。個人トークはルーム名なし（送信者名だけの通知にする）
+function getNotifyRoomTitle() {
+  if (!currentRoomIsGroup) return "";
+  const titleEl = document.getElementById("talk-title");
+  return titleEl ? titleEl.textContent : "";
+}
+
 async function getAllTalkData(talkId, preloadedRoomSnapshot) {
   const talkTitle = document.getElementById("talk-title");
   const talkArea = document.getElementById("talk-area");
@@ -593,7 +631,7 @@ async function getAllTalkData(talkId, preloadedRoomSnapshot) {
       roomSnapshot = await db.collection("KokoKengaku").doc(talkId).get();
     }
     const roomData = roomSnapshot.data();
-    talkTitle.textContent = roomData.title;
+    applyRoomHeader(roomData);
 
     db.collection("users_random").doc(myUserId).update({
       [`unreadCounts.${talkId}`]: 0
@@ -1155,7 +1193,6 @@ function clearMessageDraft(id) {
 
 // ★ 現在のトークルームのメンバー（自分以外）へ新着通知を送る。失敗しても送信処理には影響しない
 function notifyRoom(text, replyTargetId = replyToId) {
-  const titleEl = document.getElementById("talk-title");
 
   // ★ 返信メッセージなら、返信先の投稿者（ユーザーID・表示名）を調べて通知文に使う
   let replyToUserId = null;
@@ -1168,7 +1205,7 @@ function notifyRoom(text, replyTargetId = replyToId) {
 
   return sendMessageNotification(db, {
     roomId: talkId,
-    roomTitle: titleEl ? titleEl.textContent : "",
+    roomTitle: getNotifyRoomTitle(),
     memberIds: currentRoomMembers,
     senderId: myUserId,
     senderName: drawerUsername.textContent,
@@ -1180,12 +1217,11 @@ function notifyRoom(text, replyTargetId = replyToId) {
 
 // ★ アンケートに回答（または回答を変更）したことを、トークルームの全メンバー（本人を除く）に通知する
 function notifyPollAnswer(isChange) {
-  const titleEl = document.getElementById("talk-title");
-  const roomTitle = titleEl ? titleEl.textContent : "";
+  const roomTitle = getNotifyRoomTitle();
   const name = drawerUsername.textContent;
   return sendPushToUsers(db, {
     targetIds: (currentRoomMembers || []).filter((id) => id && id !== myUserId),
-    title: `${roomTitle}|${name}`,
+    title: roomTitle ? `${roomTitle}|${name}` : name,
     body: isChange ? `${name}がアンケートの回答を変更しました` : `${name}がアンケートに回答しました`,
     url: `talk.html?id=${encodeURIComponent(talkId)}`
   });
@@ -1226,10 +1262,79 @@ async function addMessage(talkId) {
   }
 }
 
+// ================================
+// ★ グループアイコンの変更（管理者のみ・グループのみ）
+// ================================
+function renderGroupIconEditor() {
+  const area = document.getElementById("group-icon-area");
+  if (!area) return;
+  const canEdit = meIsAdmin && currentRoomIsGroup;
+  area.classList.toggle("hidden", !canEdit);
+  if (!canEdit) return;
+
+  const holder = document.getElementById("group-icon-holder");
+  const removeButton = document.getElementById("group-icon-remove-button");
+  const titleEl = document.getElementById("talk-title");
+  holder.innerHTML = "";
+  holder.appendChild(createAvatar(titleEl ? titleEl.textContent : "", "large", currentRoomImageUrl));
+  removeButton.classList.toggle("hidden", !currentRoomImageUrl);
+}
+
+// file が null のときは画像を削除して頭文字アイコンに戻す
+async function saveGroupIcon(file) {
+  const changeButton = document.getElementById("group-icon-change-button");
+  const removeButton = document.getElementById("group-icon-remove-button");
+  const originalText = changeButton.textContent;
+  changeButton.disabled = true;
+  removeButton.disabled = true;
+  changeButton.textContent = file ? "アップロード中..." : "削除中...";
+  try {
+    const newUrl = file ? await uploadImageToImgbb(file) : "";
+    await db.collection("KokoKengaku").doc(talkId).update({ imageUrl: newUrl });
+    currentRoomImageUrl = newUrl;
+
+    // 画面上部のアイコンとモーダル内のアイコンを更新
+    const titleEl = document.getElementById("talk-title");
+    const headerHolder = document.getElementById("talk-title-avatar");
+    if (headerHolder) {
+      headerHolder.innerHTML = "";
+      headerHolder.appendChild(createAvatar(titleEl ? titleEl.textContent : "", undefined, newUrl));
+    }
+    renderGroupIconEditor();
+  } catch (error) {
+    console.error("グループアイコンの保存エラー:", error);
+    await AppDialog.alert("グループアイコンの変更に失敗しました。\n" + (error.message || String(error)));
+  } finally {
+    changeButton.disabled = false;
+    removeButton.disabled = false;
+    changeButton.textContent = originalText;
+  }
+}
+
+document.addEventListener("DOMContentLoaded", () => {
+  const input = document.getElementById("group-icon-input");
+  const changeButton = document.getElementById("group-icon-change-button");
+  const removeButton = document.getElementById("group-icon-remove-button");
+  if (!input || !changeButton || !removeButton) return;
+
+  changeButton.addEventListener("click", () => input.click());
+  input.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    input.value = "";
+    if (!file) return;
+    await saveGroupIcon(file);
+  });
+  removeButton.addEventListener("click", async () => {
+    const ok = await AppDialog.confirm("グループアイコンの画像を削除しますか？", { okText: "削除する", danger: true });
+    if (ok) await saveGroupIcon(null);
+  });
+});
+
 // ★ ルームの members リストに入っている人のみを表示するように修正
 function getMember(talkId) {
   const memberArea = document.getElementById("member-area");
   memberArea.innerHTML = "";
+  renderGroupIconEditor();
 
   // 自分が管理者かどうかを判定
   const isMeAdmin = (getUserCache(myUserId) || {}).isAdmin || false;
