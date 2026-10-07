@@ -1,18 +1,6 @@
 import { initPush, logoutPush, setupPushButton, sendProfileChangeNotification } from "./notify.js";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyAqIiNj0N4WruPSOkWbeo5gxzsNyeMkuLo",
-  authDomain: "appsforschool-study.firebaseapp.com",
-  projectId: "appsforschool-study",
-  storageBucket: "appsforschool-study.firebasestorage.app",
-  messagingSenderId: "740735293440",
-  appId: "1:740735293440:web:982702b6d53aaa18ec60e5"
-};
-
-// Firebase 初期化とサービス取得
-const app = firebase.initializeApp(firebaseConfig);
-const auth = firebase.auth();
-const db = firebase.firestore();
+import { auth, db, onAuthStateChanged, signOut, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, where, onSnapshot, serverTimestamp, getCountFromServer } from "./firebase.js";
 
 let myUid = "";
 let myUserId = "";
@@ -93,8 +81,8 @@ function createAvatar(name, size, imageUrl) {
 let imgbbApiKeyCache = null;
 async function uploadImageToImgbb(file) {
   if (!imgbbApiKeyCache) {
-    const keyDoc = await db.collection("system_keys").doc("imgbb").get();
-    if (!keyDoc.exists) {
+    const keyDoc = await getDoc(doc(db, "system_keys", "imgbb"));
+    if (!keyDoc.exists()) {
       throw new Error("APIキーの設定が見つかりません。セキュリティルールかドキュメントを確認してください。");
     }
     imgbbApiKeyCache = keyDoc.data().apiKey;
@@ -155,7 +143,7 @@ function closeDrawer() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  auth.onAuthStateChanged(async (user) => {
+  onAuthStateChanged(auth, async (user) => {
    try {
     if (user) {
       
@@ -164,7 +152,7 @@ document.addEventListener("DOMContentLoaded", () => {
       drawerUserId.textContent = myUserId;
       
       setLoadingStage("ユーザー情報を確認しています...", 10);
-      const userSnapshot = await db.collection("users_random").doc(myUserId).get();
+      const userSnapshot = await getDoc(doc(db, "users_random", myUserId));
       const userData = userSnapshot.data();
 
       if (userData.isActive) {
@@ -221,7 +209,7 @@ const handleLogout = async () => {
   if (isConfirmed) {
     try {
     await logoutPush(); // ★ この端末への通知紐づけを解除
-    await auth.signOut(auth);
+    await signOut(auth);
     console.log("ログアウトしました！");
     await AppDialog.alert("ログアウトしました。");
   } catch (error) {
@@ -389,7 +377,7 @@ async function handleProfileEditOrSave() {
 
       profileEditButton.textContent = "保存中...";
 
-      await db.collection("users_random").doc(currentProfileUserId).set(
+      await setDoc(doc(db, "users_random", currentProfileUserId), 
         {
           name: newName,
           profileText: newProfileText,
@@ -470,8 +458,8 @@ async function openProfileModal(userId, startEditMode = false) {
   }
 
   try {
-    const userSnapshot = await db.collection("users_random").doc(userId).get();
-    if (userSnapshot.exists) {
+    const userSnapshot = await getDoc(doc(db, "users_random", userId));
+    if (userSnapshot.exists()) {
       const userData = userSnapshot.data();
 
       // ★ ユーザーデータをまとめてキャッシュに反映
@@ -639,7 +627,7 @@ function getUserDisplayName(userId) {
 // ★ 個人タブ用に全ユーザーを読み込む（名前・アイコンはユーザーキャッシュにも反映する）
 async function loadAllUsers() {
   try {
-    const snapshot = await db.collection("users_random").get();
+    const snapshot = await getDocs(collection(db, "users_random"));
     allUsersList = snapshot.docs.map((doc) => {
       const d = doc.data() || {};
       setUserCache(doc.id, {
@@ -829,11 +817,11 @@ async function startPersonalTalk(user, isSelf) {
       ? `dm_${myUserId}`
       : `dm_${[myUserId, user.userId].sort().join("__")}`;
     const members = isSelf ? [myUserId] : [myUserId, user.userId];
-    await db.collection("KokoKengaku").doc(roomId).set({
+    await setDoc(doc(db, "KokoKengaku", roomId), {
       // 個人トークの表示名は相手の名前から動的に決めるので、title は管理者画面などでの予備
       title: isSelf ? `${getUserDisplayName(myUserId)}（自分）` : `${getUserDisplayName(myUserId)}と${displayName}`,
       members: members,
-      lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      lastUpdatedAt: serverTimestamp()
     });
     window.location.href = `./talk.html?id=${roomId}`;
   } catch (error) {
@@ -922,7 +910,7 @@ async function getAllTalkData() {
     if (isInitialTalkListLoad) {
       setLoadingStage("最終確認情報を読み込んでいます...", 15);
     }
-    const initialUserSnapshot = await db.collection("users_random").doc(myUserId).get();
+    const initialUserSnapshot = await getDoc(doc(db, "users_random", myUserId));
     currentUserLastCheckedMap = (initialUserSnapshot.data() || {}).lastChecked || {};
   } catch (error) {
     console.error("最終確認情報の初期取得エラー:", error);
@@ -935,8 +923,8 @@ async function getAllTalkData() {
   await loadAllUsers();
 
   // ★ 以降のlastChecked変更は、トーク一覧の更新とは独立してリアルタイム監視する
-  userDocUnsubscribeForUnread = db.collection("users_random").doc(myUserId)
-    .onSnapshot((userDoc) => {
+  userDocUnsubscribeForUnread = onSnapshot(doc(db, "users_random", myUserId),
+    (userDoc) => {
       const userData = userDoc.data() || {};
       currentUserLastCheckedMap = userData.lastChecked || {};
 
@@ -953,14 +941,14 @@ async function getAllTalkData() {
   }
 
   try {
-    let query = db.collection("KokoKengaku");
+    let roomsQuery = collection(db, "KokoKengaku");
     
     if (!meIsAdmin) {
       // 一般ユーザーの場合は、自分がメンバーに含まれるルームのみに絞り込む
-      query = query.where("members", "array-contains", myUserId);
+      roomsQuery = query(roomsQuery, where("members", "array-contains", myUserId));
     }
     
-    talkListenerUnsubscribe = query.onSnapshot(async (talkSnapshot) => {
+    talkListenerUnsubscribe = onSnapshot(roomsQuery, async (talkSnapshot) => {
         // ★ このスナップショットが「初回のトーク一覧表示」かどうかを固定しておく
         const isThisInitialLoad = isInitialTalkListLoad;
         if (isThisInitialLoad) {
@@ -1105,24 +1093,24 @@ async function updateSingleRoomUnread(roomId, lastCheckedTimestamp) {
   if (!document.getElementById(`unread-${roomId}`)) return;
 
   const lastCheckedTime = lastCheckedTimestamp ? lastCheckedTimestamp.toDate() : new Date(0);
-  const baseQuery = db.collection("KokoKengaku")
-    .doc(roomId)
-    .collection("talk")
-    .where("time", ">", lastCheckedTime);
+  const baseQuery = query(
+    collection(db, "KokoKengaku", roomId, "talk"),
+    where("time", ">", lastCheckedTime)
+  );
 
   let unreadCount = null;
 
   try {
     // ★ 該当メッセージを全部ダウンロードしてから件数を数えるのではなく、
     //   Firestoreの集計クエリ(count())で「件数だけ」をサーバー側で数えてもらう。
-    const unreadSnapshot = await baseQuery.count().get();
+    const unreadSnapshot = await getCountFromServer(baseQuery);
     unreadCount = unreadSnapshot.data().count;
   } catch (countError) {
     // ★ 集計クエリが使えない／失敗する場合でも未読数が出せるように、
     //   以前の「全件取得して件数を数える」方式にフォールバックする
     console.error(`未読数の集計クエリに失敗 [Room: ${roomId}]。通常のクエリにフォールバックします:`, countError);
     try {
-      const fallbackSnapshot = await baseQuery.get();
+      const fallbackSnapshot = await getDocs(baseQuery);
       unreadCount = fallbackSnapshot.size;
     } catch (fallbackError) {
       console.error(`未読数の取得に失敗 [Room: ${roomId}]:`, fallbackError);
@@ -1219,7 +1207,7 @@ async function openCreateTalkModal() {
   createTalkMemberList.innerHTML = "";
 
   try {
-    const usersSnapshot = await db.collection("users_random").get();
+    const usersSnapshot = await getDocs(collection(db, "users_random"));
     allUsersCache = usersSnapshot.docs
       .map((doc) => ({
         userId: doc.id,
@@ -1307,10 +1295,10 @@ async function handleCreateTalk() {
   createTalkSubmitButton.textContent = "作成中...";
 
   try {
-    await db.collection("KokoKengaku").add({
+    await addDoc(collection(db, "KokoKengaku"), {
       title: title,
       members: members,
-      lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      lastUpdatedAt: serverTimestamp()
     });
 
     createTalkModal.classList.add("hidden");

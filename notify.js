@@ -3,6 +3,8 @@
 //     { appId: "OneSignalのApp ID", restApiKey: "OneSignalのREST APIキー" }
 //   ★ サイトごとにOneSignalのアプリを分ける場合は、ここのドキュメントIDだけをサイトごとに変える
 //     （チャットサイト: "onesignal" / 問題投稿サイト: "onesignal_ProblemPosting"）
+import { collection, doc, getDoc, getDocs } from "./firebase.js";
+
 const KEY_DOC_ID = "onesignal";
 
 let keysCache = null;
@@ -13,8 +15,8 @@ let initStep = "";         // 初期化のどの段階か（エラー表示用�
 
 async function loadKeys(db) {
   if (keysCache) return keysCache;
-  const snap = await db.collection("system_keys").doc(KEY_DOC_ID).get();
-  if (!snap.exists) throw new Error(`Firestoreの system_keys/${KEY_DOC_ID} が見つかりません。`);
+  const snap = await getDoc(doc(db, "system_keys", KEY_DOC_ID));
+  if (!snap.exists()) throw new Error(`Firestoreの system_keys/${KEY_DOC_ID} が見つかりません。`);
   const data = snap.data();
   if (!data.appId || !data.restApiKey) throw new Error(`system_keys/${KEY_DOC_ID} に appId / restApiKey がありません。`);
   keysCache = data;
@@ -251,7 +253,7 @@ export async function sendPushToUsers(db, { targetIds, title, body, url, topic }
 //   失敗しても呼び出し元の処理には影響させない
 export async function sendProfileChangeNotification(db, { senderId, userName }) {
   try {
-    const snapshot = await db.collection("users_random").get();
+    const snapshot = await getDocs(collection(db, "users_random"));
     const ids = snapshot.docs
       .filter((doc) => (doc.data() || {}).isActive !== false)
       .map((doc) => doc.id)

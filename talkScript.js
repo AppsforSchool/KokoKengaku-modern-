@@ -1,18 +1,6 @@
 import { initPush, logoutPush, setupPushButton, sendMessageNotification, sendPushToUsers, sendProfileChangeNotification } from "./notify.js";
 
-const firebaseConfig = {
-  apiKey: "AIzaSyAqIiNj0N4WruPSOkWbeo5gxzsNyeMkuLo",
-  authDomain: "appsforschool-study.firebaseapp.com",
-  projectId: "appsforschool-study",
-  storageBucket: "appsforschool-study.firebasestorage.app",
-  messagingSenderId: "740735293440",
-  appId: "1:740735293440:web:982702b6d53aaa18ec60e5"
-};
-
-// Firebase 初期化とサービス取得
-const app = firebase.initializeApp(firebaseConfig);
-const auth = firebase.auth();
-const db = firebase.firestore();
+import { auth, db, onAuthStateChanged, signOut, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, where, orderBy, onSnapshot, writeBatch, serverTimestamp, arrayUnion, Timestamp, documentId } from "./firebase.js";
 
 let myUserId = "";
 let myUid = "";
@@ -73,9 +61,7 @@ async function fetchAndCacheUsers(userIds, options = {}) {
   // ★ チャンクごとのクエリは並列実行する（直列awaitのボトルネックを避けるため）
   await Promise.all(chunks.map(async (chunk) => {
     try {
-      const snapshot = await db.collection("users_random")
-        .where(firebase.firestore.FieldPath.documentId(), "in", chunk)
-        .get();
+      const snapshot = await getDocs(query(collection(db, "users_random"), where(documentId(), "in", chunk)));
 
       const foundIds = new Set();
       snapshot.forEach((doc) => {
@@ -351,16 +337,13 @@ function closeDrawer() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
-  auth.onAuthStateChanged(async (user) => {
+  onAuthStateChanged(auth, async (user) => {
     try {
       if (user) {
         myUserId = user.email.split("@")[0];
         drawerUserId.textContent = myUserId;
 
-        const userSnapshot = await db
-          .collection("users_random")
-          .doc(myUserId)
-          .get();
+        const userSnapshot = await getDoc(doc(db, "users_random", myUserId));
         const userData = userSnapshot.data();
 
         if (userData.isActive) {
@@ -435,8 +418,8 @@ document.addEventListener("DOMContentLoaded", () => {
 //   二重に取得しないよう再利用するため）
 async function setupMemberSnapshots(talkId) {
   try {
-    const roomSnapshot = await db.collection("KokoKengaku").doc(talkId).get();
-    if (!roomSnapshot.exists) return null;
+    const roomSnapshot = await getDoc(doc(db, "KokoKengaku", talkId));
+    if (!roomSnapshot.exists()) return null;
 
     const roomData = roomSnapshot.data();
     const memberUserIds = roomData.members || [];
@@ -463,7 +446,7 @@ const handleLogout = async () => {
   if (isConfirmed) {
     try {
       await logoutPush(); // ★ この端末への通知紐づけを解除
-      await auth.signOut(auth);
+      await signOut(auth);
       console.log("ログアウトしました！");
       await AppDialog.alert("ログアウトしました。");
     } catch (error) {
@@ -628,21 +611,19 @@ async function getAllTalkData(talkId, preloadedRoomSnapshot) {
       if (isInitialTalkLoad && !initialLoadSkipped) {
         setLoadingStage("トークルーム情報を読み込んでいます...", 25);
       }
-      roomSnapshot = await db.collection("KokoKengaku").doc(talkId).get();
+      roomSnapshot = await getDoc(doc(db, "KokoKengaku", talkId));
     }
     const roomData = roomSnapshot.data();
     applyRoomHeader(roomData);
 
-    db.collection("users_random").doc(myUserId).update({
+    updateDoc(doc(db, "users_random", myUserId), {
       [`unreadCounts.${talkId}`]: 0
     }).catch(err => console.error("未読リセットエラー:", err));
     
 
-    db.collection("KokoKengaku")
-      .doc(talkId)
-      .collection("talk")
-      .orderBy("time", "asc")
-      .onSnapshot(async (messageSnapshot) => {
+    onSnapshot(
+      query(collection(db, "KokoKengaku", talkId, "talk"), orderBy("time", "asc")),
+      async (messageSnapshot) => {
         // ★ このスナップショットが「初回のトーク表示」かどうかを固定しておく
         //   （isInitialTalkLoad はこの後すぐ false にするため、判定結果をローカルに保持する）
         const isThisInitialLoad = isInitialTalkLoad;
@@ -709,12 +690,8 @@ async function getAllTalkData(talkId, preloadedRoomSnapshot) {
 
           const readByList = messageData.readBy || [];
           if (messageData.userId !== myUserId && !readByList.includes(myUserId)) {
-            db.collection("KokoKengaku")
-              .doc(talkId)
-              .collection("talk")
-              .doc(talkDoc.id)
-              .update({
-                readBy: firebase.firestore.FieldValue.arrayUnion(myUserId)
+            updateDoc(doc(db, "KokoKengaku", talkId, "talk", talkDoc.id), {
+                readBy: arrayUnion(myUserId)
               })
               .catch(err => console.error("既読更新エラー:", err));
           }
@@ -1100,8 +1077,8 @@ function formatDateTime(date) {
 let imgbbApiKeyCache = null;
 async function uploadImageToImgbb(file) {
   if (!imgbbApiKeyCache) {
-    const keyDoc = await db.collection("system_keys").doc("imgbb").get();
-    if (!keyDoc.exists) {
+    const keyDoc = await getDoc(doc(db, "system_keys", "imgbb"));
+    if (!keyDoc.exists()) {
       throw new Error("APIキーの設定が見つかりません。セキュリティルールかドキュメントを確認してください。");
     }
     imgbbApiKeyCache = keyDoc.data().apiKey;
@@ -1235,18 +1212,15 @@ async function addMessage(talkId) {
   const myUserId = user.email.split("@")[0];
   const replyToSnapshot = replyToId; // ★ 送信前に返信先IDを確定させておく
   try {
-    await db.collection("KokoKengaku")
-      .doc(talkId)
-      .collection("talk")
-      .add({
+    await addDoc(collection(db, "KokoKengaku", talkId, "talk"), {
         userId: myUserId,
         message: message,     
         readBy: [],
         replyTo: replyToSnapshot || null,
-        time: firebase.firestore.FieldValue.serverTimestamp()
+        time: serverTimestamp()
       });
-    await db.collection("KokoKengaku").doc(talkId).update({
-      lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp() // これを追加！
+    await updateDoc(doc(db, "KokoKengaku", talkId), {
+      lastUpdatedAt: serverTimestamp() // これを追加！
     });
     notifyRoom(message, replyToSnapshot); // ★ 新着通知（待たない）
     cancelReply(); // ★ 送信成功後は返信状態を解除
@@ -1290,7 +1264,7 @@ async function saveGroupIcon(file) {
   changeButton.textContent = file ? "アップロード中..." : "削除中...";
   try {
     const newUrl = file ? await uploadImageToImgbb(file) : "";
-    await db.collection("KokoKengaku").doc(talkId).update({ imageUrl: newUrl });
+    await updateDoc(doc(db, "KokoKengaku", talkId), { imageUrl: newUrl });
     currentRoomImageUrl = newUrl;
 
     // 画面上部のアイコンとモーダル内のアイコンを更新
@@ -1394,9 +1368,9 @@ function getMember(talkId) {
 
 async function updateLastCheckedTime(talkId, myUserId) {
   try {
-    await db.collection("users_random").doc(myUserId).set({
+    await setDoc(doc(db, "users_random", myUserId), {
       lastChecked: {
-        [talkId]: firebase.firestore.FieldValue.serverTimestamp()
+        [talkId]: serverTimestamp()
       }
     }, { merge: true });
     console.log(`${talkId} の最終確認時刻を更新しました`);
@@ -1480,9 +1454,9 @@ async function openReadByModal(readByList) {
     // 万が一キャッシュに載っていないイレギュラーなユーザーIDが含まれていた場合のみ個別get
     if (!cached) {
       try {
-        const userSnapshot = await db.collection("users_random").doc(userId).get();
+        const userSnapshot = await getDoc(doc(db, "users_random", userId));
       
-        if (userSnapshot.exists) {
+        if (userSnapshot.exists()) {
           const userData = userSnapshot.data();
           cached = setUserCache(userId, {
             name: userData.name || "名前未設定",
@@ -1601,13 +1575,10 @@ function openEditModal(thisMessageId, messageUserId, messageText, messageTime) {
 
 async function newMessageChange(messageId, newUserId, newMessage, newTimeValue) {
   try {
-    const docRef = db.collection("KokoKengaku")
-      .doc(talkId)
-      .collection("talk")
-      .doc(messageId);
+    const docRef = doc(db, "KokoKengaku", talkId, "talk", messageId);
 
     // ★ 変更前のメッセージ内容をchangeLogに記録する
-    const docSnapshot = await docRef.get();
+    const docSnapshot = await getDoc(docRef);
     const currentData = docSnapshot.data() || {};
     const previousMessage = currentData.message || "";
     const existingChangeLog = Array.isArray(currentData.changeLog) ? currentData.changeLog : [];
@@ -1625,11 +1596,11 @@ async function newMessageChange(messageId, newUserId, newMessage, newTimeValue) 
     if (meIsAdmin && newTimeValue) {
       const parsedDate = new Date(newTimeValue);
       if (!isNaN(parsedDate.getTime())) {
-        updateData.time = firebase.firestore.Timestamp.fromDate(parsedDate);
+        updateData.time = Timestamp.fromDate(parsedDate);
       }
     }
 
-    await docRef.update(updateData);
+    await updateDoc(docRef, updateData);
     await AppDialog.alert("変更しました。");
   }
   catch (error) {
@@ -1641,11 +1612,7 @@ async function newMessageChange(messageId, newUserId, newMessage, newTimeValue) 
 async function messageDelete(messageId) {
   try {
     // ★ 実際にdeleteするのではなく、isDisplayをfalseにして非表示化する
-    await db.collection("KokoKengaku")
-      .doc(talkId)
-      .collection("talk")
-      .doc(messageId)
-      .update({ isDisplay: false });
+    await updateDoc(doc(db, "KokoKengaku", talkId, "talk", messageId), { isDisplay: false });
     editModal.classList.add("hidden");
     await AppDialog.alert("削除しました。");
   } catch (error) {
@@ -1693,7 +1660,7 @@ async function openForwardModal(messageDocs) {
   forwardModalLoading.classList.remove("hidden");
 
   try {
-    const roomsSnapshot = await db.collection("KokoKengaku").get();
+    const roomsSnapshot = await getDocs(collection(db, "KokoKengaku"));
 
     forwardModalLoading.classList.add("hidden");
     forwardRoomList.innerHTML = "";
@@ -1738,8 +1705,8 @@ async function forwardMessageToRoom(targetRoomId, roomItemEl) {
   const forwardCount = pendingForwardItems.length;
 
   try {
-    const batch = db.batch();
-    const targetTalkCollection = db.collection("KokoKengaku").doc(targetRoomId).collection("talk");
+    const batch = writeBatch(db);
+    const targetTalkCollection = collection(db, "KokoKengaku", targetRoomId, "talk");
 
     pendingForwardItems.forEach((item) => {
       // ★ コピーしたデータをそのまま書き込む（既読・返信先だけリセット。送信者・日時・本文・画像・アンケート等はそのまま）
@@ -1748,11 +1715,11 @@ async function forwardMessageToRoom(targetRoomId, roomItemEl) {
         replyTo: null
       });
 
-      batch.set(targetTalkCollection.doc(), newMessageDoc);
+      batch.set(doc(targetTalkCollection), newMessageDoc);
     });
 
-    batch.update(db.collection("KokoKengaku").doc(targetRoomId), {
-      lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    batch.update(doc(db, "KokoKengaku", targetRoomId), {
+      lastUpdatedAt: serverTimestamp()
     });
 
     await batch.commit();
@@ -1846,9 +1813,9 @@ async function handleBulkDelete() {
   selectionForwardButton.disabled = true;
 
   try {
-    const batch = db.batch();
+    const batch = writeBatch(db);
     selectedMessageIds.forEach((messageId) => {
-      const ref = db.collection("KokoKengaku").doc(talkId).collection("talk").doc(messageId);
+      const ref = doc(db, "KokoKengaku", talkId, "talk", messageId);
       batch.update(ref, { isDisplay: false });
     });
     await batch.commit();
@@ -1870,9 +1837,9 @@ async function handleBulkForward() {
 
   try {
     const docs = await Promise.all(
-      targetIds.map((id) => db.collection("KokoKengaku").doc(talkId).collection("talk").doc(id).get())
+      targetIds.map((id) => getDoc(doc(db, "KokoKengaku", talkId, "talk", id)))
     );
-    const validDocs = docs.filter((doc) => doc.exists);
+    const validDocs = docs.filter((d) => d.exists());
 
     if (validDocs.length === 0) {
       await AppDialog.alert("転送できるメッセージがありませんでした。");
@@ -2054,7 +2021,7 @@ async function handleProfileEditOrSave() {
       profileEditButton.textContent = "保存中...";
 
       // Firestoreの users_random コレクションを更新
-      await db.collection("users_random").doc(currentProfileUserId).set(
+      await setDoc(doc(db, "users_random", currentProfileUserId), 
         {
           name: newName,
           profileText: newProfileText,
@@ -2136,8 +2103,8 @@ async function openProfileModal(userId, startEditMode = false) {
   }
 
   try {
-    const userSnapshot = await db.collection("users_random").doc(userId).get();
-    if (userSnapshot.exists) {
+    const userSnapshot = await getDoc(doc(db, "users_random", userId));
+    if (userSnapshot.exists()) {
       const userData = userSnapshot.data();
 
       // ★ ユーザーデータをまとめてキャッシュに反映
@@ -2253,18 +2220,18 @@ document.addEventListener("DOMContentLoaded", () => {
       const imageUrl = await uploadImageToImgbb(selectedImageFile);
 
       // 現在のトークルーム（talkId）のtalkに画像メッセージを追加（任意のキャプション付き）
-      await db.collection("KokoKengaku").doc(talkId).collection("talk").add({
+      await addDoc(collection(db, "KokoKengaku", talkId, "talk"), {
         userId: myUserId,
         message: imageMessageInput.value,
         imageUrl: imageUrl,
         readBy: [],
         replyTo: replyToId || null,
-        time: firebase.firestore.FieldValue.serverTimestamp()
+        time: serverTimestamp()
       });
 
       // ルーム一覧側の未読カウント・並び順のためにlastUpdatedAtも更新
-      await db.collection("KokoKengaku").doc(talkId).update({
-        lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+      await updateDoc(doc(db, "KokoKengaku", talkId), {
+        lastUpdatedAt: serverTimestamp()
       });
 
       notifyRoom(imageMessageInput.value || "📷 画像を送信しました"); // ★ 新着通知（待たない）
@@ -2420,18 +2387,18 @@ async function submitPoll() {
   pollSubmitButton.textContent = "送信中...";
 
   try {
-    await db.collection("KokoKengaku").doc(talkId).collection("talk").add({
+    await addDoc(collection(db, "KokoKengaku", talkId, "talk"), {
       userId: myUserId,
       message: question,
       choices: choices,
       answer: {},
       readBy: [],
       replyTo: replyToId || null,
-      time: firebase.firestore.FieldValue.serverTimestamp()
+      time: serverTimestamp()
     });
 
-    await db.collection("KokoKengaku").doc(talkId).update({
-      lastUpdatedAt: firebase.firestore.FieldValue.serverTimestamp()
+    await updateDoc(doc(db, "KokoKengaku", talkId), {
+      lastUpdatedAt: serverTimestamp()
     });
 
     notifyRoom("📊 " + question); // ★ 新着通知（待たない）
@@ -2511,7 +2478,7 @@ function buildPollWidget(messageDocId, choices, answerMap) {
     answerButton.textContent = "送信中...";
 
     try {
-      await db.collection("KokoKengaku").doc(talkId).collection("talk").doc(messageDocId).update({
+      await updateDoc(doc(db, "KokoKengaku", talkId, "talk", messageDocId), {
         [`answer.${myUserId}`]: selectedIndex
       });
       notifyPollAnswer(hasMyAnswer); // ★ 全メンバーへ通知（待たない）。再回答なら「変更しました」
@@ -2567,8 +2534,8 @@ async function openPollVotersModal(answerMap, choiceIndex, choiceLabel) {
     // 万が一キャッシュに載っていないイレギュラーなユーザーIDが含まれていた場合のみ個別get
     if (!cached) {
       try {
-        const userSnapshot = await db.collection("users_random").doc(userId).get();
-        if (userSnapshot.exists) {
+        const userSnapshot = await getDoc(doc(db, "users_random", userId));
+        if (userSnapshot.exists()) {
           const userData = userSnapshot.data();
           cached = setUserCache(userId, {
             name: userData.name || "名前未設定",
