@@ -407,3 +407,141 @@ footer p {
     border-radius: var(--radius-md);
   }
 }
+
+/* --- ヘッダー右側：シェア／アカウント情報（トーク画面と共通デザイン） --- */
+#user-data {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+#setting-button {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-weight: 700;
+  font-size: 0.82rem;
+  padding: 0.5rem 0.9rem;
+  width: auto;
+  text-align: center;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  background-color: var(--primary-soft);
+  color: var(--primary-dark);
+  border: none;
+  border-radius: var(--radius-full);
+  transition: background-color 0.2s var(--ease), transform 0.15s var(--ease);
+}
+#setting-button:hover {
+  background-color: rgba(var(--primary-rgb), 0.22);
+}
+#setting-button:active {
+  transform: scale(0.97);
+}
+
+/* --- アカウント設定ドロワー（他画面と共通デザイン） --- */
+.drawer-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  background-color: rgba(15, 20, 26, 0.45);
+  backdrop-filter: blur(2px);
+  z-index: 999;
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity 0.3s var(--ease), visibility 0.3s var(--ease);
+}
+.drawer-overlay.is-open {
+  opacity: 1;
+  visibility: visible;
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  right: 0;
+  width: 320px;
+  max-width: 85%;
+  height: 100%;
+  background-color: var(--surface);
+  box-shadow: var(--shadow-lg);
+  z-index: 1000;
+  transform: translateX(100%);
+  transition: transform 0.35s var(--ease);
+  padding: 1.5rem;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+}
+.drawer.is-open {
+  transform: translateX(0);
+}
+
+.drawer-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 1.5rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--border);
+}
+.drawer-header p {
+  font-weight: 700;
+  font-size: 1.2rem;
+  margin: 0;
+  color: var(--text);
+}
+.drawer-close-button {
+  background-color: var(--surface-alt);
+  border: none;
+  font-size: 1.3rem;
+  font-weight: bold;
+  cursor: pointer;
+  color: var(--text-muted);
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: var(--radius-full);
+  transition: background-color 0.2s var(--ease), color 0.2s var(--ease);
+  text-align: center;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.drawer-close-button:hover {
+  background-color: var(--border);
+  color: var(--text);
+}
+
+.drawer-content {
+  flex-grow: 1;
+  overflow-y: auto;
+  padding-left: 2px;
+  padding-right: 6px;
+}
+
+.drawer-section {
+  margin-bottom: 1.75rem;
+  padding-bottom: 1.5rem;
+  border-bottom: 1px solid var(--border);
+}
+.drawer-section:last-child {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.drawer-section p.title {
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.04em;
+  color: var(--primary);
+  text-transform: uppercase;
+  margin-top: 0;
+  margin-bottom: 0.6rem;
+}
+.drawer-section p {
+  font-size: 0.92rem;
+  margin-bottom: 0.6rem;
+  color: var(--text);
+}

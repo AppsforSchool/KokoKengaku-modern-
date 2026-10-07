@@ -10,7 +10,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=BIZ+UDGothic:wght@400;700&display=swap" rel="stylesheet">
-  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="style.css" data-ui-css="style">
+  <!-- ★ 新UI/旧UIの切り替え（通常のscript。<link>の直後に置くこと） -->
+  <script src="uiSwitch.js"></script>
   <link rel="icon" type="image/png" sizes="32x32" href="icon-512.png">
   <link rel="apple-touch-icon" href="icon-512.png">
   <link rel="icon" type="image/png" sizes="192x192" href="icon-512.png">
@@ -54,7 +56,10 @@
   
   <header id="app-header">
     <p id="header-title">高校見学</p>
-    <button id="share-modal-btn">シェア</button>
+    <div id="user-data">
+      <button id="share-modal-btn">シェア</button>
+      <button id="setting-button">アカウント情報</button>
+    </div>
   </header>
   
   <main>
