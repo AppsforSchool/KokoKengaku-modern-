@@ -1,6 +1,9 @@
+import { perfMark, perfStart, perfSample, perfNote, perfShowReport } from "./perf.js";
 import { initPush, logoutPush, setupPushButton, sendProfileChangeNotification } from "./notify.js";
 
 import { auth, db, onAuthStateChanged, signOut, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, where, onSnapshot, serverTimestamp, getCountFromServer } from "./firebase.js";
+
+perfMark("JSモジュールの読み込み・実行開始（HTML解析・Firebase等の取得）");
 
 let myUid = "";
 let myUserId = "";
@@ -143,9 +146,11 @@ function closeDrawer() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  perfMark("DOMContentLoaded（DOM構築完了まで）");
   onAuthStateChanged(auth, async (user) => {
    try {
     if (user) {
+      perfMark("ログイン状態の確定（Firebase Auth）");
       
       
       myUserId = user.email.split("@")[0];
@@ -154,6 +159,7 @@ document.addEventListener("DOMContentLoaded", () => {
       setLoadingStage("ユーザー情報を確認しています...", 10);
       const userSnapshot = await getDoc(doc(db, "users_random", myUserId));
       const userData = userSnapshot.data();
+      perfMark("自分のユーザー情報の取得（Firestore）");
 
       if (userData.isActive) {
         drawerUsername.textContent = userData.name;
@@ -182,7 +188,8 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         // ★ プッシュ通知の初期化（失敗してもトーク一覧の表示には影響させない）
-        initPush(db, myUserId);
+        const endPushPerf = perfStart("OneSignal初期化（キー取得・SDK・login）");
+        Promise.resolve(initPush(db, myUserId)).then(endPushPerf, endPushPerf);
         setupPushButton("enable-push-button");
 
         getAllTalkData();
@@ -586,6 +593,8 @@ function hideLoadingOverlayNowForAppList() {
   if (selectionContainer) {
     selectionContainer.classList.remove("hidden");
   }
+  perfMark("オーバーレイを閉じて一覧を表示");
+  perfShowReport({ isAdmin: meIsAdmin, page: "app.html（トーク一覧）" }); // ★ 管理者にだけ計測結果を表示
 }
 
 // ================================
@@ -912,6 +921,7 @@ async function getAllTalkData() {
     }
     const initialUserSnapshot = await getDoc(doc(db, "users_random", myUserId));
     currentUserLastCheckedMap = (initialUserSnapshot.data() || {}).lastChecked || {};
+    if (isInitialTalkListLoad) perfMark("lastChecked（最終確認情報）の取得");
   } catch (error) {
     console.error("最終確認情報の初期取得エラー:", error);
   }
@@ -921,6 +931,7 @@ async function getAllTalkData() {
     setLoadingStage("ユーザー情報を読み込んでいます...", 25);
   }
   await loadAllUsers();
+  if (isInitialTalkListLoad) perfMark("全ユーザー一覧の取得（loadAllUsers）");
 
   // ★ 以降のlastChecked変更は、トーク一覧の更新とは独立してリアルタイム監視する
   userDocUnsubscribeForUnread = onSnapshot(doc(db, "users_random", myUserId),
@@ -953,6 +964,7 @@ async function getAllTalkData() {
         const isThisInitialLoad = isInitialTalkListLoad;
         if (isThisInitialLoad) {
           isInitialTalkListLoad = false;
+          perfMark("ルーム一覧の初回データ受信（onSnapshot）");
         }
 
         const changes = talkSnapshot.docChanges();
@@ -1038,6 +1050,11 @@ async function getAllTalkData() {
         regroupTalkButtons(talkButtonArea);
         updateGroupEmptyText(talkButtonArea);
 
+        if (isThisInitialLoad) {
+          perfMark("ルーム一覧・個人タブのDOM構築");
+          perfNote(`ルーム数: ${totalChanges}件 / 全ユーザー数: ${allUsersList.length}人 / 管理者: ${meIsAdmin ? "はい" : "いいえ"}`);
+        }
+
         // ★ 未読数をピンポイントで数え直して更新する
         roomsToRefreshUnread.forEach((roomId) => {
           const unreadPromise = updateSingleRoomUnread(roomId, currentUserLastCheckedMap[roomId]);
@@ -1073,6 +1090,7 @@ async function getAllTalkData() {
                 })
             ));
           }
+          if (unreadCountPromises.length > 0) perfMark(`未読数の計算完了（${unreadCountPromises.length}ルーム分）`);
           hideLoadingOverlayNowForAppList();
         }
         
@@ -1092,6 +1110,7 @@ async function getAllTalkData() {
 async function updateSingleRoomUnread(roomId, lastCheckedTimestamp) {
   if (!document.getElementById(`unread-${roomId}`)) return;
 
+  const perfStartedAt = performance.now();
   const lastCheckedTime = lastCheckedTimestamp ? lastCheckedTimestamp.toDate() : new Date(0);
   const baseQuery = query(
     collection(db, "KokoKengaku", roomId, "talk"),
@@ -1105,6 +1124,7 @@ async function updateSingleRoomUnread(roomId, lastCheckedTimestamp) {
     //   Firestoreの集計クエリ(count())で「件数だけ」をサーバー側で数えてもらう。
     const unreadSnapshot = await getCountFromServer(baseQuery);
     unreadCount = unreadSnapshot.data().count;
+    perfSample("未読数のcountクエリ（1ルームあたり）", performance.now() - perfStartedAt);
   } catch (countError) {
     // ★ 集計クエリが使えない／失敗する場合でも未読数が出せるように、
     //   以前の「全件取得して件数を数える」方式にフォールバックする
@@ -1112,6 +1132,7 @@ async function updateSingleRoomUnread(roomId, lastCheckedTimestamp) {
     try {
       const fallbackSnapshot = await getDocs(baseQuery);
       unreadCount = fallbackSnapshot.size;
+      perfSample("未読数のフォールバック全件取得（1ルームあたり）", performance.now() - perfStartedAt);
     } catch (fallbackError) {
       console.error(`未読数の取得に失敗 [Room: ${roomId}]:`, fallbackError);
       // 待っている間に画面が作り直されている場合があるので、要素は取り直す

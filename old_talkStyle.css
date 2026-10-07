@@ -1478,3 +1478,91 @@ img.avatar-circle.large { width: 4.4rem; height: 4.4rem; }
   color: transparent;
   animation: wave 2s linear infinite;
 }
+
+/* ================================================================
+   ★ モーダルのヘッダー（タイトル・閉じるボタン）を固定する
+   .modal-content 自体がスクロールするので、ヘッダーを sticky にして上端に留める。
+   .modal-content の余白(padding)の分だけ負のmarginで上端・左右いっぱいに広げ、
+   スクロールした内容がヘッダーの後ろに透けて見えないよう背景色を付けている。
+   ================================================================ */
+.modal-content {
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.modal-content > .modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.modal-content > .modal-header {
+  background: #fff;
+  margin: -20px -20px 1rem;
+  padding: 20px 20px 0.8rem;
+}
+
+/* ================================================================
+   ★ グループのメンバー追加・削除（管理者のみ）：旧UI
+   ================================================================ */
+.member-item .member-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.member-remove-button {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-weight: 700;
+  font-size: 0.8rem;
+  padding: 0.3rem 0.6rem;
+  cursor: pointer;
+  background-color: #d64545;
+  color: #fff;
+  border: none;
+  border-radius: 0.3rem;
+  transition: background-color 0.3s ease;
+}
+.member-remove-button:hover { background-color: #b83a3a; }
+
+#add-member-modal .modal-content { text-align: left; }
+#add-member-search {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-weight: 700;
+  font-size: 1rem;
+  width: 100%;
+  padding: 0.5rem;
+  border: 2px solid #ccc;
+  border-radius: 6px;
+  box-sizing: border-box;
+  transition: border-color 0.3s ease, box-shadow 0.3s ease;
+}
+#add-member-search:hover { border-color: #999; }
+#add-member-search:focus {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.25);
+  outline: none;
+}
+#add-member-loading { padding: 0.5rem; color: #808080; font-size: 0.9rem; text-align: center; }
+#add-member-list {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  gap: 4px;
+  max-height: 40vh;
+  overflow-y: auto;
+  margin: 0.5rem 0 0;
+  padding: 0.4rem;
+  border: 2px solid #eee;
+  border-radius: 8px;
+  box-sizing: border-box;
+}
+.add-member-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border-radius: 6px;
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.3s ease;
+}
+.add-member-item:hover { background-color: #f9f9f9; }
+.add-member-item input[type="checkbox"] { flex-shrink: 0; width: 18px; height: 18px; accent-color: var(--primary); cursor: pointer; }
+.add-member-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#add-member-submit-button { margin-top: 1rem; }

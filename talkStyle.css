@@ -1963,3 +1963,113 @@ footer p {
   padding: 0.5rem 0.9rem;
   font-size: 0.82rem;
 }
+
+/* ================================================================
+   ★ モーダルのヘッダー（タイトル・閉じるボタン）を固定する
+   .modal-content 自体がスクロールするので、ヘッダーを sticky にして上端に留める。
+   .modal-content の余白(padding)の分だけ負のmarginで上端・左右いっぱいに広げ、
+   スクロールした内容がヘッダーの後ろに透けて見えないよう背景色を付けている。
+   ================================================================ */
+.modal-content {
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.modal-content > .modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.modal-content > .modal-header {
+  background: var(--surface);
+  margin: -1.5rem -1.5rem 1.25rem;
+  padding: 1.5rem 1.5rem 1rem;
+}
+
+/* ================================================================
+   ★ グループのメンバー追加・削除（管理者のみ）
+   ================================================================ */
+.member-item .member-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.member-remove-button {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-weight: 700;
+  font-size: 0.78rem;
+  padding: 0.35rem 0.8rem;
+  cursor: pointer;
+  background-color: #fdecec;
+  color: #d64545;
+  border: none;
+  border-radius: var(--radius-full);
+  transition: background-color 0.2s var(--ease), transform 0.15s var(--ease);
+}
+.member-remove-button:hover { background-color: #f9d6d6; }
+.member-remove-button:active { transform: scale(0.97); }
+
+#add-member-modal .modal-content { text-align: left; }
+#add-member-search {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-size: 1rem;
+  width: 100%;
+  padding: 0.6rem 0.8rem;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-alt);
+  box-sizing: border-box;
+  transition: border-color 0.2s var(--ease), box-shadow 0.2s var(--ease), background-color 0.2s var(--ease);
+}
+#add-member-search:hover { border-color: #c7ccd2; }
+#add-member-search:focus {
+  border-color: var(--primary);
+  background-color: var(--surface);
+  box-shadow: 0 0 0 4px rgba(var(--primary-rgb), 0.15);
+  outline: none;
+}
+#add-member-loading {
+  padding: 0.5rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  text-align: center;
+}
+#add-member-list {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  width: 100%;
+  gap: 4px;
+  max-height: 40vh;
+  overflow-y: auto;
+  margin-top: 0.75rem;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 0.4rem;
+  box-sizing: border-box;
+}
+.add-member-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  padding: 0.5rem 0.6rem;
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  text-align: left;
+  transition: background-color 0.15s var(--ease);
+}
+.add-member-item:hover { background-color: var(--surface-alt); }
+.add-member-item input[type="checkbox"] {
+  flex-shrink: 0;
+  width: 18px;
+  height: 18px;
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.add-member-item span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+#add-member-submit-button { margin-top: 1rem; }

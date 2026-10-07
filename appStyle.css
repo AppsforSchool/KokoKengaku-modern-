@@ -1466,3 +1466,24 @@ footer p {
   font-size: 0.9rem;
   padding: 1rem 0;
 }
+
+/* ================================================================
+   ★ モーダルのヘッダー（タイトル・閉じるボタン）を固定する
+   .modal-content 自体がスクロールするので、ヘッダーを sticky にして上端に留める。
+   .modal-content の余白(padding)の分だけ負のmarginで上端・左右いっぱいに広げ、
+   スクロールした内容がヘッダーの後ろに透けて見えないよう背景色を付けている。
+   ================================================================ */
+.modal-content {
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.modal-content > .modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.modal-content > .modal-header {
+  background: var(--surface);
+  margin: -1.5rem -1.5rem 1.25rem;
+  padding: 1.5rem 1.5rem 1rem;
+}

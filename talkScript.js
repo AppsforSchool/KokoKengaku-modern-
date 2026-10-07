@@ -1,6 +1,9 @@
+import { perfMark, perfStart, perfSample, perfNote, perfShowReport } from "./perf.js";
 import { initPush, logoutPush, setupPushButton, sendMessageNotification, sendPushToUsers, sendProfileChangeNotification } from "./notify.js";
 
-import { auth, db, onAuthStateChanged, signOut, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, where, orderBy, onSnapshot, writeBatch, serverTimestamp, arrayUnion, Timestamp, documentId } from "./firebase.js";
+import { auth, db, onAuthStateChanged, signOut, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, where, orderBy, onSnapshot, writeBatch, serverTimestamp, arrayUnion, arrayRemove, Timestamp, documentId } from "./firebase.js";
+
+perfMark("JSモジュールの読み込み・実行開始（HTML解析・Firebase等の取得）");
 
 let myUserId = "";
 let myUid = "";
@@ -337,14 +340,17 @@ function closeDrawer() {
 }
 
 document.addEventListener("DOMContentLoaded", () => {
+  perfMark("DOMContentLoaded（DOM構築完了まで）");
   onAuthStateChanged(auth, async (user) => {
     try {
       if (user) {
+        perfMark("ログイン状態の確定（Firebase Auth）");
         myUserId = user.email.split("@")[0];
         drawerUserId.textContent = myUserId;
 
         const userSnapshot = await getDoc(doc(db, "users_random", myUserId));
         const userData = userSnapshot.data();
+        perfMark("自分のユーザー情報の取得（Firestore）");
 
         if (userData.isActive) {
           drawerUsername.textContent = userData.name;
@@ -383,7 +389,9 @@ document.addEventListener("DOMContentLoaded", () => {
           const preloadedRoomSnapshot = await setupMemberSnapshots(talkId);
 
           // ★ プッシュ通知の初期化（失敗してもトーク表示には影響させない）
-          initPush(db, myUserId);
+          perfMark("ルーム情報＋メンバー情報の取得（setupMemberSnapshots全体）");
+          const endPushPerf = perfStart("OneSignal初期化（キー取得・SDK・login）");
+          Promise.resolve(initPush(db, myUserId)).then(endPushPerf, endPushPerf);
           setupPushButton("enable-push-button");
 
           getAllTalkData(talkId, preloadedRoomSnapshot);
@@ -418,7 +426,9 @@ document.addEventListener("DOMContentLoaded", () => {
 //   二重に取得しないよう再利用するため）
 async function setupMemberSnapshots(talkId) {
   try {
+    const perfRoomStart = performance.now();
     const roomSnapshot = await getDoc(doc(db, "KokoKengaku", talkId));
+    perfSample("└ ルーム文書の取得（setupMemberSnapshots内）", performance.now() - perfRoomStart);
     if (!roomSnapshot.exists()) return null;
 
     const roomData = roomSnapshot.data();
@@ -432,7 +442,10 @@ async function setupMemberSnapshots(talkId) {
     memberSubscribers.forEach(unsub => unsub());
     memberSubscribers = [];
 
+    const perfMembersStart = performance.now();
     await fetchAndCacheUsers(memberUserIds, { forceRefresh: true, lastCheckedTalkId: talkId });
+    perfSample("└ メンバー情報の一括取得（fetchAndCacheUsers）", performance.now() - perfMembersStart);
+    perfNote(`メンバー数: ${memberUserIds.length}人`);
 
     return roomSnapshot;
   } catch (error) {
@@ -512,6 +525,8 @@ function setLoadingStage(text, percent) {
 
 // ★ ローディングオーバーレイを即座に閉じ、裏に隠していたトーク本体を表示する
 function hideLoadingOverlayNow() {
+  perfMark(initialLoadSkipped ? "「あとで読み込む」で表示（画像は未完了）" : "オーバーレイを閉じてトークを表示");
+  perfShowReport({ isAdmin: meIsAdmin, page: "talk.html（トーク画面）" }); // ★ 管理者にだけ計測結果を表示
   loadingOverlay.classList.add("hidden");
   loadingOverlaySkipButton.classList.add("hidden");
   if (selectionContainer) {
@@ -629,6 +644,7 @@ async function getAllTalkData(talkId, preloadedRoomSnapshot) {
         const isThisInitialLoad = isInitialTalkLoad;
         if (isThisInitialLoad) {
           isInitialTalkLoad = false;
+          perfMark("メッセージの初回データ受信（onSnapshot）");
         }
 
         // ★ メッセージ一覧のコンテナは初回だけ作って talkArea に設置し、以降は使い回す
@@ -651,6 +667,7 @@ async function getAllTalkData(talkId, preloadedRoomSnapshot) {
           if (data.userId) candidateSenderIds.push(data.userId);
         });
         await fetchAndCacheUsers(candidateSenderIds);
+        if (isThisInitialLoad) perfMark("送信者情報の取得（fetchAndCacheUsers）");
 
         // ★ このバッチで表示された画像要素を集めておく（初回表示時の読み込み待ちに使う）
         const imagesInThisRender = [];
@@ -958,6 +975,11 @@ async function getAllTalkData(talkId, preloadedRoomSnapshot) {
         }
 
         updateLastCheckedTime(talkId, myUserId);
+
+        if (isThisInitialLoad) {
+          perfMark("メッセージのDOM構築");
+          perfNote(`メッセージ件数（初回受信）: ${totalChanges}件 / 画像: ${imagesInThisRender.length}枚`);
+        }
 
         // ★ 初回のトーク表示時のみ、画像の読み込みが終わる（またはスキップされる）までオーバーレイを出したままにする
         if (isThisInitialLoad) {
@@ -1313,6 +1335,11 @@ function getMember(talkId) {
   // 自分が管理者かどうかを判定
   const isMeAdmin = (getUserCache(myUserId) || {}).isAdmin || false;
 
+  // ★ メンバーの追加・削除は「管理者」かつ「グループトーク」のときだけ
+  const canEditMembers = isMeAdmin && currentRoomMembers.length >= 3;
+  const memberAddButton = document.getElementById("member-add-button");
+  if (memberAddButton) memberAddButton.classList.toggle("hidden", !canEditMembers);
+
   // ★ 全キャッシュのキーではなく、ルームに属するメンバーIDリストでループを回す
   for (const userId of currentRoomMembers) {
     const cached = getUserCache(userId) || {};
@@ -1354,12 +1381,26 @@ function getMember(talkId) {
 
     memberElement.appendChild(memberLeft);
 
-    // 自分が管理者かつデータがある場合のみ、右側に最終確認時間を追加
+    // 自分が管理者の場合のみ、右側に最終確認時間と（グループなら）削除ボタンを追加
     if (isMeAdmin) {
+      const memberRight = document.createElement("div");
+      memberRight.classList.add("member-right");
+
       const timeSpan = document.createElement("span");
       timeSpan.classList.add("member-last-checked");
       timeSpan.textContent = lastCheckedTimeStr ? lastCheckedTimeStr : "未確認";
-      memberElement.appendChild(timeSpan);
+      memberRight.appendChild(timeSpan);
+
+      if (canEditMembers) {
+        const removeButton = document.createElement("button");
+        removeButton.type = "button";
+        removeButton.classList.add("member-remove-button");
+        removeButton.textContent = "削除";
+        removeButton.addEventListener("click", () => removeMemberFromGroup(talkId, userId, memberName));
+        memberRight.appendChild(removeButton);
+      }
+
+      memberElement.appendChild(memberRight);
     }
 
     memberArea.appendChild(memberElement);
@@ -1427,6 +1468,150 @@ document.addEventListener("DOMContentLoaded", () => {
     memberModal.classList.add("hidden");
   });
 });
+
+// ================================
+// ★ グループのメンバー追加・削除（管理者のみ）
+// ================================
+
+// ★ メンバーを1人削除する（グループは3人以上なので、3人以下になる削除はできない）
+async function removeMemberFromGroup(talkId, userId, memberName) {
+  if (currentRoomMembers.length <= 3) {
+    await AppDialog.alert("グループは3人以上必要なので、これ以上メンバーを削除できません。");
+    return;
+  }
+  const ok = await AppDialog.confirm(`${memberName}をこのグループから削除しますか？`, { okText: "削除する", danger: true });
+  if (!ok) return;
+
+  try {
+    await updateDoc(doc(db, "KokoKengaku", talkId), { members: arrayRemove(userId) });
+    currentRoomMembers = currentRoomMembers.filter((id) => id !== userId);
+    getMember(talkId);
+  } catch (error) {
+    console.error("メンバー削除エラー:", error);
+    await AppDialog.alert("メンバーを削除できませんでした。\n" + (error.message || String(error)));
+  }
+}
+
+let addMemberModal;
+let addMemberSearch;
+let addMemberLoading;
+let addMemberList;
+let addMemberSubmitButton;
+let addMemberCandidates = []; // { userId, name, imageUrl, no }
+
+document.addEventListener("DOMContentLoaded", () => {
+  addMemberModal = document.getElementById("add-member-modal");
+  addMemberSearch = document.getElementById("add-member-search");
+  addMemberLoading = document.getElementById("add-member-loading");
+  addMemberList = document.getElementById("add-member-list");
+  addMemberSubmitButton = document.getElementById("add-member-submit-button");
+  const openButton = document.getElementById("member-add-button");
+  const closeButton = document.getElementById("add-member-modal-close");
+  if (!addMemberModal || !openButton) return;
+
+  openButton.addEventListener("click", openAddMemberModal);
+  closeButton.addEventListener("click", () => addMemberModal.classList.add("hidden"));
+  addMemberSearch.addEventListener("input", () => renderAddMemberList(addMemberSearch.value.trim()));
+  addMemberList.addEventListener("change", updateAddMemberSubmitState);
+  addMemberSubmitButton.addEventListener("click", handleAddMembers);
+});
+
+async function openAddMemberModal() {
+  addMemberSearch.value = "";
+  addMemberList.innerHTML = "";
+  addMemberLoading.classList.remove("hidden");
+  addMemberModal.classList.remove("hidden");
+  updateAddMemberSubmitState();
+
+  try {
+    const snapshot = await getDocs(collection(db, "users_random"));
+    addMemberCandidates = snapshot.docs
+      .filter((d) => (d.data() || {}).isActive !== false && !currentRoomMembers.includes(d.id))
+      .map((d) => {
+        const data = d.data() || {};
+        return {
+          userId: d.id,
+          name: data.name || d.id,
+          imageUrl: data.imageUrl || "",
+          no: typeof data.no === "number" ? data.no : Infinity
+        };
+      })
+      .sort((a, b) => a.no - b.no);
+    addMemberLoading.classList.add("hidden");
+    renderAddMemberList("");
+  } catch (error) {
+    addMemberLoading.classList.add("hidden");
+    console.error("ユーザー一覧の取得エラー:", error);
+    await AppDialog.alert("ユーザー一覧の取得に失敗しました。\n" + (error.message || String(error)));
+  }
+}
+
+function renderAddMemberList(filterText) {
+  // 検索しても選択が消えないよう、再描画前のチェック状態を保持する
+  const previouslyChecked = new Set(
+    Array.from(addMemberList.querySelectorAll("input[type=checkbox]:checked")).map((cb) => cb.value)
+  );
+  addMemberList.innerHTML = "";
+
+  const lower = filterText.toLowerCase();
+  const filtered = addMemberCandidates.filter((u) => previouslyChecked.has(u.userId) || u.name.toLowerCase().includes(lower));
+
+  if (filtered.length === 0) {
+    const empty = document.createElement("p");
+    empty.textContent = addMemberCandidates.length === 0 ? "追加できるユーザーがいません。" : "該当するユーザーがいません。";
+    addMemberList.appendChild(empty);
+    updateAddMemberSubmitState();
+    return;
+  }
+
+  filtered.forEach((u) => {
+    const label = document.createElement("label");
+    label.classList.add("add-member-item");
+
+    const checkbox = document.createElement("input");
+    checkbox.type = "checkbox";
+    checkbox.value = u.userId;
+    checkbox.checked = previouslyChecked.has(u.userId);
+    label.appendChild(checkbox);
+    label.appendChild(createAvatar(u.name, "small", u.imageUrl));
+
+    const nameSpan = document.createElement("span");
+    nameSpan.textContent = u.name;
+    label.appendChild(nameSpan);
+
+    addMemberList.appendChild(label);
+  });
+  updateAddMemberSubmitState();
+}
+
+function updateAddMemberSubmitState() {
+  const count = addMemberList.querySelectorAll("input[type=checkbox]:checked").length;
+  addMemberSubmitButton.disabled = count === 0;
+  addMemberSubmitButton.textContent = count > 0 ? `${count}人を追加する` : "追加する";
+}
+
+async function handleAddMembers() {
+  const ids = Array.from(addMemberList.querySelectorAll("input[type=checkbox]:checked")).map((cb) => cb.value);
+  if (ids.length === 0) return;
+
+  const talkId = getParmFromUrl("id");
+  addMemberSubmitButton.disabled = true;
+  addMemberSubmitButton.textContent = "追加中...";
+
+  try {
+    await updateDoc(doc(db, "KokoKengaku", talkId), { members: arrayUnion(...ids) });
+    currentRoomMembers = Array.from(new Set([...currentRoomMembers, ...ids]));
+    addMemberModal.classList.add("hidden");
+    getMember(talkId); // まず一覧を更新
+    // 追加した人の名前・アイコンをキャッシュに入れてから再描画
+    await fetchAndCacheUsers(currentRoomMembers, { forceRefresh: true, lastCheckedTalkId: talkId });
+    getMember(talkId);
+  } catch (error) {
+    console.error("メンバー追加エラー:", error);
+    await AppDialog.alert("メンバーを追加できませんでした。\n" + (error.message || String(error)));
+    updateAddMemberSubmitState();
+  }
+}
 
 let readModal;
 let readModalClose;

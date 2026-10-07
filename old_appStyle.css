@@ -1347,3 +1347,24 @@ img.avatar-circle.large { width: 4.4rem; height: 4.4rem; }
   cursor: pointer;
 }
 .create-talk-member-item span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* ================================================================
+   ★ モーダルのヘッダー（タイトル・閉じるボタン）を固定する
+   .modal-content 自体がスクロールするので、ヘッダーを sticky にして上端に留める。
+   .modal-content の余白(padding)の分だけ負のmarginで上端・左右いっぱいに広げ、
+   スクロールした内容がヘッダーの後ろに透けて見えないよう背景色を付けている。
+   ================================================================ */
+.modal-content {
+  max-height: 85vh;
+  overflow-y: auto;
+}
+.modal-content > .modal-header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+.modal-content > .modal-header {
+  background: #fff;
+  margin: -20px -20px 1rem;
+  padding: 20px 20px 0.8rem;
+}

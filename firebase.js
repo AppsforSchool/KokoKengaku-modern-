@@ -25,6 +25,7 @@ import {
   getCountFromServer,
   serverTimestamp,
   arrayUnion,
+  arrayRemove,
   Timestamp,
   documentId
 } from "https://www.gstatic.com/firebasejs/12.14.0/firebase-firestore.js";
@@ -46,5 +47,5 @@ export {
   onAuthStateChanged, signInWithEmailAndPassword, signOut,
   collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc,
   query, where, orderBy, onSnapshot, writeBatch, getCountFromServer,
-  serverTimestamp, arrayUnion, Timestamp, documentId
+  serverTimestamp, arrayUnion, arrayRemove, Timestamp, documentId
 };
