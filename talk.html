@@ -47,6 +47,7 @@
         <p class="title">メンバー</p>
         <span id="member-modal-close" class="close-button">&times;</span>
       </div>
+      <div class="modal-scroll-body">
       
       <!-- グループアイコンの変更（管理者 かつ グループのときだけ表示） -->
       <div id="group-icon-area" class="hidden">
@@ -65,6 +66,7 @@
         
       </div>
     </div>
+    </div>
   </div>
 
   <!-- メンバー追加モーダル（管理者のみ） -->
@@ -74,10 +76,12 @@
         <p class="title">メンバーを追加</p>
         <span id="add-member-modal-close" class="close-button">&times;</span>
       </div>
+      <div class="modal-scroll-body">
       <input id="add-member-search" type="text" placeholder="ユーザー名で検索">
       <p id="add-member-loading" class="hidden">読み込み中...</p>
       <div id="add-member-list"></div>
       <button id="add-member-submit-button" class="normal-button" disabled>追加する</button>
+    </div>
     </div>
   </div>
 
@@ -87,10 +91,12 @@
         <p class="title">既読</p>
         <span id="read-modal-close" class="close-button">&times;</span>
       </div>
+      <div class="modal-scroll-body">
       
       <div id="read-area">
         
       </div>
+    </div>
     </div>
   </div>
 
@@ -100,6 +106,7 @@
         <p class="title">編集</p>
         <span id="edit-modal-close" class="close-button">&times;</span>
       </div>
+      <div class="modal-scroll-body">
       <input id="new-userId-input" placeholder="user id"></input>
       <textarea id="new-message-input" rows="5"></textarea>
       <p id="new-message-time-label" class="profile-label hidden" style="margin-top: 0.5rem;">送信日時（管理者のみ編集可）</p>
@@ -107,6 +114,7 @@
       <button id="new-message-change-button">保存</button>
       <span class="split-line"></span>
       <button id="message-delete-button">削除</button>
+    </div>
     </div>
   </div>
 
@@ -117,8 +125,10 @@
         <p class="title">メッセージを転送</p>
         <span id="forward-modal-close" class="close-button">&times;</span>
       </div>
+      <div class="modal-scroll-body">
       <p id="forward-modal-loading">読み込み中...</p>
       <div id="forward-room-list"></div>
+    </div>
     </div>
   </div>
 
@@ -129,6 +139,7 @@
         <p class="title">プロフィール</p>
         <span id="profile-modal-close" class="close-button">&times;</span>
       </div>
+      <div class="modal-scroll-body">
       <div id="profile-area">
         <div class="profile-avatar-wrap">
           <div id="profile-avatar-holder"></div>
@@ -149,6 +160,7 @@
         </div>
       </div>
     </div>
+    </div>
   </div>
 
   <!-- プロフィールモーダル ここまで -->
@@ -159,7 +171,9 @@
         <p class="title">シェア</p>
         <span id="share-modal-close" class="close-button">&times;</span>
       </div>
+      <div class="modal-scroll-body">
       <img src="qrcode.png" alt="QR Code">
+    </div>
     </div>
   </div>
 
@@ -170,6 +184,7 @@
         <p class="title">画像を送信</p>
         <span id="image-modal-close" class="close-button">&times;</span>
       </div>
+      <div class="modal-scroll-body">
 
       <input type="file" id="modal-image-input" accept="image/*" class="visually-hidden-input" />
       <button id="select-image-button" class="normal-button">画像を選択する</button>
@@ -180,6 +195,7 @@
       <textarea id="image-message-input" rows="3" placeholder="メッセージを添える（任意）"></textarea>
       <button id="submit-image-button" class="normal-button" disabled>画像を送信</button>
     </div>
+    </div>
   </div>
 
   <!-- アンケート作成モーダル -->
@@ -189,6 +205,7 @@
         <p class="title">アンケートを作成</p>
         <span id="poll-create-modal-close" class="close-button">&times;</span>
       </div>
+      <div class="modal-scroll-body">
 
       <textarea id="poll-question-input" rows="3" placeholder="質問・説明文を入力"></textarea>
 
@@ -197,6 +214,7 @@
       <button id="poll-add-choice-button" class="secondary-button" type="button">＋ 選択肢を追加</button>
 
       <button id="poll-submit-button" class="normal-button" disabled>アンケートを送信</button>
+    </div>
     </div>
   </div>
 
@@ -207,7 +225,9 @@
         <p class="title" id="poll-voters-title">回答した人</p>
         <span id="poll-voters-modal-close" class="close-button">&times;</span>
       </div>
+      <div class="modal-scroll-body">
       <div id="poll-voters-area"></div>
+    </div>
     </div>
   </div>
   

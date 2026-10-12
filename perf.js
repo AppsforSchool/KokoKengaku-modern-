@@ -21,6 +21,22 @@ export function perfMark(label) {
   lastMainEnd = end;
 }
 
+// ★ 「最後に完了した段階」を取得する（読み込みが止まったとき、どこで止まっているかを表示するため）
+export function perfLastMarkLabel() {
+  const main = spans.filter((x) => x.kind === "main");
+  return main.length ? main[main.length - 1].label : "（開始直後）";
+}
+
+// ★ 一定時間たっても読み込みが終わらないとき、onStall(経過秒, 最後に完了した段階) を呼ぶ（以後も5秒ごと）
+export function perfWatchStall(isDone, onStall, firstMs = 12000) {
+  const tick = () => {
+    if (isDone()) return;
+    onStall(Math.round(now() / 1000), perfLastMarkLabel());
+    setTimeout(tick, 5000);
+  };
+  setTimeout(tick, firstMs);
+}
+
 export function perfStart(label) {
   const span = { label, start: now(), end: null, kind: "parallel" };
   spans.push(span);
@@ -65,7 +81,7 @@ function collectBrowserTimings() {
 
 function collectSlowResources() {
   const entries = performance.getEntriesByType("resource")
-    .map((r) => ({ name: shortUrl(r.name), type: r.initiatorType, start: r.startTime, duration: r.duration, size: r.transferSize || 0 }))
+    .map((r) => ({ name: shortUrl(r.name), type: r.initiatorType, start: r.startTime, duration: r.duration, size: r.transferSize || 0, proto: r.nextHopProtocol || "" }))
     .sort((a, b) => b.duration - a.duration)
     .slice(0, 10);
   return entries;
@@ -102,7 +118,7 @@ function buildReport(page) {
   lines.push("");
   lines.push("■ 通信が遅かったリソース上位10件（所要時間 / 開始時刻 / サイズ）");
   collectSlowResources().forEach((r) => {
-    lines.push(`${r.name} [${r.type}]: ${fmt(r.duration)} / 開始 ${fmt(r.start)}${r.size ? " / " + Math.round(r.size / 1024) + "KB" : ""}`);
+    lines.push(`${r.name} [${r.type}${r.proto ? "/" + r.proto : ""}]: ${fmt(r.duration)} / 開始 ${fmt(r.start)}${r.size ? " / " + Math.round(r.size / 1024) + "KB" : ""}`);
   });
   return { text: lines.join("\n"), total: end };
 }
@@ -122,31 +138,49 @@ function injectStyle() {
 }
 
 // ★ 読み込みが終わったあとに呼ぶ。管理者でなければ何も表示しない
-export function perfShowReport({ isAdmin, page }) {
+export function perfShowReport({ isAdmin, page, diagnostics }) {
   if (shown) return;
   shown = true;
   if (!isAdmin) return;
 
-  const { text } = buildReport(page || location.pathname.split("/").pop() || "page");
-  window.__perfReport = text;
-  console.log(text);
+  const { text: baseText } = buildReport(page || location.pathname.split("/").pop() || "page");
+  let fullText = baseText;
+  window.__perfReport = fullText;
+  console.log(baseText);
 
   injectStyle();
   const wrap = document.createElement("div");
   wrap.id = "perf-report";
+  const diagButton = diagnostics ? '<button type="button" data-act="diag">通信診断を実行</button>' : "";
   wrap.innerHTML =
     '<div class="perf-box">' +
       '<div class="perf-head"><span>読み込み計測（管理者のみ）</span>' +
-        '<span><button type="button" data-act="copy">コピー</button><button type="button" data-act="close">閉じる</button></span></div>' +
+        "<span>" + diagButton +
+        '<button type="button" data-act="copy">コピー</button>' +
+        '<button type="button" data-act="close">閉じる</button></span></div>' +
       "<pre></pre>" +
     "</div>";
-  wrap.querySelector("pre").textContent = text;
+  const pre = wrap.querySelector("pre");
+  pre.textContent = fullText;
+
   wrap.addEventListener("click", async (e) => {
-    const act = e.target && e.target.getAttribute && e.target.getAttribute("data-act");
-    if (act === "close" || e.target === wrap) wrap.remove();
+    const target = e.target;
+    const act = target && target.getAttribute && target.getAttribute("data-act");
+    if (act === "close" || target === wrap) wrap.remove();
     if (act === "copy") {
-      try { await navigator.clipboard.writeText(text); e.target.textContent = "コピーしました"; }
-      catch (err) { e.target.textContent = "コピー失敗"; }
+      try { await navigator.clipboard.writeText(fullText); target.textContent = "コピーしました"; }
+      catch (err) { target.textContent = "コピー失敗"; }
+    }
+    if (act === "diag" && diagnostics) {
+      target.disabled = true;
+      target.textContent = "診断中...（最大1〜2分）";
+      let lines;
+      try { lines = await diagnostics(); }
+      catch (err) { lines = ["診断に失敗しました: " + (err && err.message ? err.message : err)]; }
+      fullText = fullText + "\n\n■ 通信診断\n" + lines.join("\n");
+      window.__perfReport = fullText;
+      pre.textContent = fullText;
+      target.textContent = "診断完了";
     }
   });
   document.body.appendChild(wrap);

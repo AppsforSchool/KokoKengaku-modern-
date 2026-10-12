@@ -1,7 +1,10 @@
-import { perfMark, perfStart, perfSample, perfNote, perfShowReport } from "./perf.js";
-import { initPush, logoutPush, setupPushButton, sendMessageNotification, sendPushToUsers, sendProfileChangeNotification } from "./notify.js";
+import { perfMark, perfStart, perfSample, perfNote, perfShowReport, perfWatchStall } from "./perf.js";
+import { initPush, logoutPush, setupPushButton, sendMessageNotification, sendPushToUsers, sendProfileChangeNotification, notifyPageLoadFinished } from "./notify.js";
 
-import { auth, db, onAuthStateChanged, signOut, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, where, orderBy, onSnapshot, writeBatch, serverTimestamp, arrayUnion, arrayRemove, Timestamp, documentId } from "./firebase.js";
+import { runFirestoreDiagnostics } from "./diag.js";
+import { createGaugeBadge } from "./statusBadge.js";
+import { probeEnvironment, attachRecoveryButton } from "./recover.js";
+import { firestoreTransport, firestoreCacheMode, authStorageMode, hedged, auth, db, onAuthStateChanged, signOut, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, where, orderBy, onSnapshot, writeBatch, serverTimestamp, arrayUnion, arrayRemove, Timestamp, documentId } from "./firebase.js";
 
 perfMark("JSモジュールの読み込み・実行開始（HTML解析・Firebase等の取得）");
 
@@ -43,62 +46,65 @@ function hasActivePrize(cached) {
   return typeof grantedAt === "number" && grantedAt + PRIZE_DURATION_MS > Date.now();
 }
 
-// ★ 複数ユーザーの情報を「1件ずつ直列await」ではなく、まとめて（最大30件ずつの"in"クエリで）取得する共通ヘルパー。
-//   個別に.get()するより大幅に高速。デフォルトではキャッシュ済みのIDは除外するが、
-//   forceRefresh:trueで強制的に最新化できる。lastCheckedTalkIdを渡すと、そのトークの
-//   最終確認日時(userLastCheckedCache)も同時に更新する。
+// ★ 複数ユーザーの情報を、1人1件の getDoc を「並列」で取得する共通ヘルパー。
+//   以前は "in" クエリ（まとめて1回）だったが、計測で、そのクエリだけが数十秒止まることがあったため変更した。
+//   同じIDの取得がすでに進行中なら、その結果を待つだけにして二重に取得しない
+//   （グループは、メンバー情報の取得を裏で走らせたまま、メッセージの送信者も同じ取得を共有できる）。
+//   デフォルトではキャッシュ済みのIDは除外し、forceRefresh:true で強制的に最新化できる。
+//   取得のたびに、現在のトーク(talkId)の最終確認日時(userLastCheckedCache)も更新する。
+const userFetchInflight = new Map(); // userId -> Promise
+
+function fetchOneUser(userId) {
+  if (userFetchInflight.has(userId)) return userFetchInflight.get(userId);
+
+  const promise = (async () => {
+    const startedAt = performance.now();
+    try {
+      const snapshot = await hedged(() => getDoc(doc(db, "users_random", userId)));
+      perfSample("ユーザー1人分のgetDoc（並列）", performance.now() - startedAt);
+
+      if (!snapshot.exists()) {
+        // ★ 存在しないIDは「不明なユーザー」として確定させておく
+        setUserCache(userId, { name: "不明なユーザー", isAdmin: false, imageUrl: "", profileText: "" });
+        return;
+      }
+      const userData = snapshot.data();
+      setUserCache(userId, {
+        name: userData.name || "名前未設定",
+        isAdmin: userData.isAdmin || false,
+        imageUrl: userData.imageUrl || "",
+        profileText: userData.profileText || "",
+        prizeGrantedAt: userData.prizeGrantedAt
+      });
+
+      if (talkId) {
+        if (!userLastCheckedCache[userId]) userLastCheckedCache[userId] = {};
+        if (userData.lastChecked && userData.lastChecked[talkId]) {
+          userLastCheckedCache[userId][talkId] = formatDateTime(userData.lastChecked[talkId].toDate());
+        } else {
+          userLastCheckedCache[userId][talkId] = "";
+        }
+      }
+    } catch (error) {
+      console.error("ユーザー情報の取得エラー:", userId, error);
+    } finally {
+      userFetchInflight.delete(userId);
+    }
+  })();
+
+  userFetchInflight.set(userId, promise);
+  return promise;
+}
+
 async function fetchAndCacheUsers(userIds, options = {}) {
-  const { forceRefresh = false, lastCheckedTalkId = null } = options;
+  const { forceRefresh = false } = options;
 
   const idsToFetch = Array.from(new Set(userIds)).filter(
     (id) => id && (forceRefresh || !getUserCache(id))
   );
   if (idsToFetch.length === 0) return;
 
-  const CHUNK_SIZE = 30; // ★ Firestoreの"in"クエリは1回あたり最大30件まで
-  const chunks = [];
-  for (let i = 0; i < idsToFetch.length; i += CHUNK_SIZE) {
-    chunks.push(idsToFetch.slice(i, i + CHUNK_SIZE));
-  }
-
-  // ★ チャンクごとのクエリは並列実行する（直列awaitのボトルネックを避けるため）
-  await Promise.all(chunks.map(async (chunk) => {
-    try {
-      const snapshot = await getDocs(query(collection(db, "users_random"), where(documentId(), "in", chunk)));
-
-      const foundIds = new Set();
-      snapshot.forEach((doc) => {
-        foundIds.add(doc.id);
-        const userData = doc.data();
-        setUserCache(doc.id, {
-          name: userData.name || "名前未設定",
-          isAdmin: userData.isAdmin || false,
-          imageUrl: userData.imageUrl || "",
-          profileText: userData.profileText || "",
-          prizeGrantedAt: userData.prizeGrantedAt
-        });
-
-        if (lastCheckedTalkId) {
-          if (!userLastCheckedCache[doc.id]) userLastCheckedCache[doc.id] = {};
-          if (userData.lastChecked && userData.lastChecked[lastCheckedTalkId]) {
-            userLastCheckedCache[doc.id][lastCheckedTalkId] =
-              formatDateTime(userData.lastChecked[lastCheckedTalkId].toDate());
-          } else {
-            userLastCheckedCache[doc.id][lastCheckedTalkId] = "";
-          }
-        }
-      });
-
-      // ★ 見つからなかった（存在しない）IDは「不明なユーザー」として確定させておく
-      chunk.forEach((id) => {
-        if (!foundIds.has(id)) {
-          setUserCache(id, { name: "不明なユーザー", isAdmin: false, imageUrl: "", profileText: "" });
-        }
-      });
-    } catch (error) {
-      console.error("ユーザー情報の一括取得エラー:", error);
-    }
-  }));
+  await Promise.all(idsToFetch.map((id) => fetchOneUser(id)));
 }
 
 let userLastCheckedCache = {}; // ★ 最終確認日時用のキャッシュを追加
@@ -306,6 +312,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadingOverlaySkipButton.addEventListener("click", () => {
     initialLoadSkipped = true;
     hideLoadingOverlayNow();
+    refreshImageBadge(); // ★ 画像がまだ読み込み中なら、画面左上に「画像を読み込み中…(a/b)」とゲージを出す
   });
   
   drawerOverlay = document.getElementById("drawerOverlay");
@@ -341,6 +348,19 @@ function closeDrawer() {
 
 document.addEventListener("DOMContentLoaded", () => {
   perfMark("DOMContentLoaded（DOM構築完了まで）");
+  // ★ 読み込みが長引いたら、オーバーレイに「どの段階で止まっているか」を表示する（スマホでもコンソール無しで確認できる）
+  let stallEnvText = "";
+  perfWatchStall(
+    () => loadingOverlay.classList.contains("hidden"),
+    (sec, label) => {
+      setLoadingStage(`読み込みに時間がかかっています（${sec}秒経過）／最後に完了した段階: ${label}${stallEnvText ? "／" + stallEnvText : ""}`);
+      if (!stallEnvText) {
+        stallEnvText = "ブラウザ状態を確認中...";
+        probeEnvironment().then((text) => { stallEnvText = text; });
+      }
+      attachRecoveryButton(loadingOverlay); // ★ 止まったブラウザから抜け出す手段（ログイン情報のリセット）
+    }
+  );
   onAuthStateChanged(auth, async (user) => {
     try {
       if (user) {
@@ -348,7 +368,7 @@ document.addEventListener("DOMContentLoaded", () => {
         myUserId = user.email.split("@")[0];
         drawerUserId.textContent = myUserId;
 
-        const userSnapshot = await getDoc(doc(db, "users_random", myUserId));
+        const userSnapshot = await hedged(() => getDoc(doc(db, "users_random", myUserId)));
         const userData = userSnapshot.data();
         perfMark("自分のユーザー情報の取得（Firestore）");
 
@@ -385,13 +405,16 @@ document.addEventListener("DOMContentLoaded", () => {
 
           // ★ メンバーのリアルタイム監視・キャッシュ化を開始（ここでルーム情報も同時に取得し、
           //   同じドキュメントの二重取得を避けるため getAllTalkData にそのまま渡して使い回す）
+          // ★ OneSignalの初期化は、トーク表示とは独立しているので、他の読み込みを待たずに先に開始する
+          const endPushPerf = perfStart("OneSignal初期化（キー取得・SDK・login）");
+          Promise.resolve(initPush(db, myUserId)).then(endPushPerf, endPushPerf);
+          perfNote(`Firestore通信方式: ${firestoreTransport} / 永続キャッシュ: ${firestoreCacheMode} / ログイン情報の保存先: ${authStorageMode}`);
+
           setLoadingStage("トークルーム・メンバー情報を読み込んでいます...", 10);
           const preloadedRoomSnapshot = await setupMemberSnapshots(talkId);
 
           // ★ プッシュ通知の初期化（失敗してもトーク表示には影響させない）
           perfMark("ルーム情報＋メンバー情報の取得（setupMemberSnapshots全体）");
-          const endPushPerf = perfStart("OneSignal初期化（キー取得・SDK・login）");
-          Promise.resolve(initPush(db, myUserId)).then(endPushPerf, endPushPerf);
           setupPushButton("enable-push-button");
 
           getAllTalkData(talkId, preloadedRoomSnapshot);
@@ -427,7 +450,7 @@ document.addEventListener("DOMContentLoaded", () => {
 async function setupMemberSnapshots(talkId) {
   try {
     const perfRoomStart = performance.now();
-    const roomSnapshot = await getDoc(doc(db, "KokoKengaku", talkId));
+    const roomSnapshot = await hedged(() => getDoc(doc(db, "KokoKengaku", talkId)));
     perfSample("└ ルーム文書の取得（setupMemberSnapshots内）", performance.now() - perfRoomStart);
     if (!roomSnapshot.exists()) return null;
 
@@ -437,14 +460,21 @@ async function setupMemberSnapshots(talkId) {
 
     // ★ 以前はメンバー1人につき1本ずつリアルタイムリスナーを張っていたが、
     //   人数分の同時接続・初期データ待ちがロードを重くしていたため、
-    //   ページ読み込み時に1回だけ、まとめて（"in"クエリで）取得する方式に変更した。
+    //   ページ読み込み時に1回だけ、1人1件のgetDocを並列で取得する方式に変更した。
     //   代わりに、メンバー一覧モーダルは開くたびに再取得して最新化する（getMemberの呼び出し元を参照）。
     memberSubscribers.forEach(unsub => unsub());
     memberSubscribers = [];
 
-    const perfMembersStart = performance.now();
-    await fetchAndCacheUsers(memberUserIds, { forceRefresh: true, lastCheckedTalkId: talkId });
-    perfSample("└ メンバー情報の一括取得（fetchAndCacheUsers）", performance.now() - perfMembersStart);
+    // ★ グループは、ヘッダーに必要なのはグループ名とアイコン（ルーム文書に入っている）だけなので、
+    //   メンバー全員の情報取得は待たずに裏で進める。個人トークは相手の名前・アイコンが必要なので待つ。
+    const endMemberPerf = perfStart(memberUserIds.length >= 3
+      ? "メンバー情報の取得（グループ・裏で並行）"
+      : "メンバー情報の取得（個人トーク・待機）");
+    const memberFetchPromise = fetchAndCacheUsers(memberUserIds, { forceRefresh: true, lastCheckedTalkId: talkId });
+    memberFetchPromise.then(endMemberPerf, endMemberPerf);
+    if (memberUserIds.length < 3) {
+      await memberFetchPromise;
+    }
     perfNote(`メンバー数: ${memberUserIds.length}人`);
 
     return roomSnapshot;
@@ -526,9 +556,10 @@ function setLoadingStage(text, percent) {
 // ★ ローディングオーバーレイを即座に閉じ、裏に隠していたトーク本体を表示する
 function hideLoadingOverlayNow() {
   perfMark(initialLoadSkipped ? "「あとで読み込む」で表示（画像は未完了）" : "オーバーレイを閉じてトークを表示");
-  perfShowReport({ isAdmin: meIsAdmin, page: "talk.html（トーク画面）" }); // ★ 管理者にだけ計測結果を表示
+  perfShowReport({ isAdmin: meIsAdmin, page: "talk.html（トーク画面）", diagnostics: () => runFirestoreDiagnostics(myUserId) }); // ★ 管理者にだけ計測結果を表示
   loadingOverlay.classList.add("hidden");
   loadingOverlaySkipButton.classList.add("hidden");
+  notifyPageLoadFinished(); // ★ この時点でOneSignalの初期化が未完了なら、「OneSignalを初期化中…」を表示する
   if (selectionContainer) {
     selectionContainer.classList.remove("hidden");
   }
@@ -537,30 +568,52 @@ function hideLoadingOverlayNow() {
   scrollTalkAreaToTarget();
 }
 
+// ★ 「あとで読み込む」を押したあと、画像がまだ読み込み中のあいだ、画面左上（OneSignalの表示の下）に出す
+//   「画像を読み込み中…(a/b)」と、その下の進捗ゲージ（a/b ＝ 読めた画像 / 全画像）。全部読めたら消える。
+let imageBadge = null;
+const imageProgress = { loaded: 0, total: 0, active: false };
+
+function refreshImageBadge() {
+  const show = initialLoadSkipped && imageProgress.active && imageProgress.loaded < imageProgress.total;
+  if (!show && !imageBadge) return;
+  if (!imageBadge) imageBadge = createGaugeBadge(2); // order=2 ＝ OneSignalの表示（order=1）の下
+  if (show) {
+    imageBadge.set(`画像を読み込み中…(${imageProgress.loaded}/${imageProgress.total})`, imageProgress.loaded / imageProgress.total);
+    imageBadge.show();
+  } else {
+    imageBadge.hide();
+  }
+}
+
 // ★ 渡された画像要素すべての読み込み（成功／失敗どちらでも）を待ってからオーバーレイを閉じる。
 //   読み込み中は「画像を読み込んでいます (n/m)」を表示する。
-//   「あとで読み込む」が既に押されていれば何もしない（既にオーバーレイは閉じている）。
+//   「あとで読み込む」が押されているとき（押された後に呼ばれた場合も含む）は、オーバーレイは閉じたままで、
+//   代わりに画面左上の「画像を読み込み中…(a/b)」とゲージで進み具合を見せる。
 async function waitForImagesThenHideOverlay(images) {
-  if (initialLoadSkipped) return;
-
   if (!images || images.length === 0) {
-    hideLoadingOverlayNow();
+    if (!initialLoadSkipped) hideLoadingOverlayNow();
     return;
   }
 
   const total = images.length;
-  let loadedCount = 0;
+  imageProgress.loaded = 0;
+  imageProgress.total = total;
+  imageProgress.active = true;
 
-  loadingOverlayText.textContent = `画像を読み込んでいます (0/${total})`;
-  loadingOverlaySkipButton.classList.remove("hidden");
+  if (!initialLoadSkipped) {
+    loadingOverlayText.textContent = `画像を読み込んでいます (0/${total})`;
+    loadingOverlaySkipButton.classList.remove("hidden");
+  }
+  refreshImageBadge(); // すでに「あとで読み込む」済みなら、ここで表示される
 
   await Promise.all(images.map((img) => {
     return new Promise((resolve) => {
       const onDone = () => {
-        loadedCount++;
+        imageProgress.loaded++;
         if (!initialLoadSkipped) {
-          loadingOverlayText.textContent = `画像を読み込んでいます (${loadedCount}/${total})`;
+          loadingOverlayText.textContent = `画像を読み込んでいます (${imageProgress.loaded}/${total})`;
         }
+        refreshImageBadge();
         resolve();
       };
       // すでに読み込み済み（キャッシュ等）ならすぐ完了扱いにする
@@ -572,6 +625,9 @@ async function waitForImagesThenHideOverlay(images) {
       img.addEventListener("error", onDone, { once: true });
     });
   }));
+
+  imageProgress.active = false;
+  refreshImageBadge(); // 全部読めたので消す
 
   if (!initialLoadSkipped) {
     hideLoadingOverlayNow();
@@ -626,7 +682,7 @@ async function getAllTalkData(talkId, preloadedRoomSnapshot) {
       if (isInitialTalkLoad && !initialLoadSkipped) {
         setLoadingStage("トークルーム情報を読み込んでいます...", 25);
       }
-      roomSnapshot = await getDoc(doc(db, "KokoKengaku", talkId));
+      roomSnapshot = await hedged(() => getDoc(doc(db, "KokoKengaku", talkId)));
     }
     const roomData = roomSnapshot.data();
     applyRoomHeader(roomData);
@@ -639,6 +695,8 @@ async function getAllTalkData(talkId, preloadedRoomSnapshot) {
     onSnapshot(
       query(collection(db, "KokoKengaku", talkId, "talk"), orderBy("time", "asc")),
       async (messageSnapshot) => {
+        // ★ 永続キャッシュが空の初回は「キャッシュ由来の空」が先に届くことがあるので、サーバーの結果を待つ
+        if (isInitialTalkLoad && messageSnapshot.metadata.fromCache && messageSnapshot.empty) return;
         // ★ このスナップショットが「初回のトーク表示」かどうかを固定しておく
         //   （isInitialTalkLoad はこの後すぐ false にするため、判定結果をローカルに保持する）
         const isThisInitialLoad = isInitialTalkLoad;

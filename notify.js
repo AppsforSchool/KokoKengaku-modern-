@@ -3,7 +3,8 @@
 //     { appId: "OneSignalのApp ID", restApiKey: "OneSignalのREST APIキー" }
 //   ★ サイトごとにOneSignalのアプリを分ける場合は、ここのドキュメントIDだけをサイトごとに変える
 //     （チャットサイト: "onesignal" / 問題投稿サイト: "onesignal_ProblemPosting"）
-import { collection, doc, getDoc, getDocs } from "./firebase.js";
+import { collection, doc, getDoc, getDocs, hedged } from "./firebase.js";
+import { createTextBadge, setStatusBadgeVisible } from "./statusBadge.js";
 
 const KEY_DOC_ID = "onesignal";
 
@@ -15,7 +16,7 @@ let initStep = "";         // 初期化のどの段階か（エラー表示用�
 
 async function loadKeys(db) {
   if (keysCache) return keysCache;
-  const snap = await getDoc(doc(db, "system_keys", KEY_DOC_ID));
+  const snap = await hedged(() => getDoc(doc(db, "system_keys", KEY_DOC_ID)));
   if (!snap.exists()) throw new Error(`Firestoreの system_keys/${KEY_DOC_ID} が見つかりません。`);
   const data = snap.data();
   if (!data.appId || !data.restApiKey) throw new Error(`system_keys/${KEY_DOC_ID} に appId / restApiKey がありません。`);
@@ -30,14 +31,41 @@ function withTimeout(promise, ms, message) {
   ]);
 }
 
+// ★ 「OneSignalを初期化中…」バッジ
+//   ページの読み込みが終わった時点で、OneSignalの初期化がまだ終わっていなければ、画面左上（ヘッダーのすぐ下）に表示し、
+//   初期化が終わったら（成功でも失敗でも）消す。表示の対象は、ページを開いたときの最初の自動初期化だけで、
+//   「通知をオンにする」ボタンからの再試行中は出さない（ボタン側に進行状況が出るため）。
+let pushBadgeTracking = false;     // 最初の自動初期化を追跡中か
+let pushBadgeDone = false;         // その初期化が終わったか（成功・失敗とも）
+let pageLoadFinished = false;      // ページの読み込みが終わったか
+let pushBadgeEl = null;
+
+function updatePushBadge() {
+  const show = pageLoadFinished && pushBadgeTracking && !pushBadgeDone;
+  if (!show && !pushBadgeEl) return;
+  if (!pushBadgeEl) pushBadgeEl = createTextBadge("OneSignalを初期化中…", 1); // ★ 共通部品（statusBadge.js）。order=1 ＝ いちばん上
+  setStatusBadgeVisible(pushBadgeEl, show);
+}
+
+// ★ ページの読み込みが終わった（読み込み画面を閉じた）ときに呼ぶ
+export function notifyPageLoadFinished() {
+  pageLoadFinished = true;
+  updatePushBadge();
+}
+
 // ★ ログイン後に1回呼ぶ。OneSignalを初期化し、Firebaseのユーザー名(userId)と端末を紐づける
 export function initPush(db, userId) {
   ctx = { db, userId };
   if (initPromise) return initPromise;
   initError = null;
+  const trackBadge = !pushBadgeTracking && !pushBadgeDone; // ★ ページを開いたときの最初の初期化だけバッジの対象にする
+  if (trackBadge) { pushBadgeTracking = true; updatePushBadge(); }
   initPromise = (async () => {
     initStep = "Firestoreからキーを取得中";
     const { appId } = await loadKeys(db);
+    // ★ キー取得は終わったので、段階の表示を進める（以前はここが更新されず、SDKが読み込めない場合でも
+    //   「Firestoreからキーを取得中」と表示されて、原因を見誤りやすかった）
+    initStep = "OneSignal SDK（OneSignalSDK.page.js）の読み込み待ち";
     // GitHub Pagesのサブパス公開でも動くよう、現在のページのフォルダをService Workerの範囲にする
     const base = location.pathname.replace(/[^/]*$/, "");
     window.OneSignalDeferred = window.OneSignalDeferred || [];
@@ -66,8 +94,18 @@ export function initPush(db, userId) {
     initError = e;
     initPromise = null;   // 次回押したときに再試行できるようにする
     console.warn("プッシュ通知の初期化に失敗:", e);
+  }).finally(() => {
+    // ★ 成功・失敗のどちらでも、最初の初期化が終わったらバッジを消す
+    if (trackBadge) { pushBadgeDone = true; updatePushBadge(); }
   });
   return initPromise;
+}
+
+// ★ 診断用：OneSignal初期化の現在の状態（失敗していれば、止まった段階を含むメッセージ）
+export function getPushInitStatus() {
+  if (initError) return "失敗: " + (initError.message || String(initError)).replace(/\n/g, " ") + " / window.OneSignal: " + typeof window.OneSignal;
+  if (initPromise) return (initStep ? "初期化中（段階: " + initStep + "）" : "完了、または初期化中") + " / window.OneSignal: " + typeof window.OneSignal;
+  return "未開始";
 }
 
 // ★ ログアウト前に呼ぶ（この端末に前のユーザー宛の通知が届き続けないようにする）

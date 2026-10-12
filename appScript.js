@@ -1,7 +1,9 @@
-import { perfMark, perfStart, perfSample, perfNote, perfShowReport } from "./perf.js";
-import { initPush, logoutPush, setupPushButton, sendProfileChangeNotification } from "./notify.js";
+import { perfMark, perfStart, perfSample, perfNote, perfShowReport, perfWatchStall } from "./perf.js";
+import { initPush, logoutPush, setupPushButton, sendProfileChangeNotification, notifyPageLoadFinished } from "./notify.js";
 
-import { auth, db, onAuthStateChanged, signOut, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, where, onSnapshot, serverTimestamp, getCountFromServer } from "./firebase.js";
+import { runFirestoreDiagnostics } from "./diag.js";
+import { probeEnvironment, attachRecoveryButton } from "./recover.js";
+import { firestoreTransport, firestoreCacheMode, authStorageMode, hedged, auth, db, onAuthStateChanged, signOut, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, where, onSnapshot, serverTimestamp, getCountFromServer } from "./firebase.js";
 
 perfMark("JSモジュールの読み込み・実行開始（HTML解析・Firebase等の取得）");
 
@@ -147,6 +149,19 @@ function closeDrawer() {
 
 document.addEventListener("DOMContentLoaded", () => {
   perfMark("DOMContentLoaded（DOM構築完了まで）");
+  // ★ 読み込みが長引いたら、オーバーレイに「どの段階で止まっているか」を表示する（スマホでもコンソール無しで確認できる）
+  let stallEnvText = "";
+  perfWatchStall(
+    () => loadingOverlay.classList.contains("hidden"),
+    (sec, label) => {
+      setLoadingStage(`読み込みに時間がかかっています（${sec}秒経過）／最後に完了した段階: ${label}${stallEnvText ? "／" + stallEnvText : ""}`);
+      if (!stallEnvText) {
+        stallEnvText = "ブラウザ状態を確認中...";
+        probeEnvironment().then((text) => { stallEnvText = text; });
+      }
+      attachRecoveryButton(loadingOverlay); // ★ 止まったブラウザから抜け出す手段（ログイン情報のリセット）
+    }
+  );
   onAuthStateChanged(auth, async (user) => {
    try {
     if (user) {
@@ -157,7 +172,7 @@ document.addEventListener("DOMContentLoaded", () => {
       drawerUserId.textContent = myUserId;
       
       setLoadingStage("ユーザー情報を確認しています...", 10);
-      const userSnapshot = await getDoc(doc(db, "users_random", myUserId));
+      const userSnapshot = await hedged(() => getDoc(doc(db, "users_random", myUserId)));
       const userData = userSnapshot.data();
       perfMark("自分のユーザー情報の取得（Firestore）");
 
@@ -188,6 +203,7 @@ document.addEventListener("DOMContentLoaded", () => {
         }
 
         // ★ プッシュ通知の初期化（失敗してもトーク一覧の表示には影響させない）
+        perfNote(`Firestore通信方式: ${firestoreTransport} / 永続キャッシュ: ${firestoreCacheMode} / ログイン情報の保存先: ${authStorageMode}`);
         const endPushPerf = perfStart("OneSignal初期化（キー取得・SDK・login）");
         Promise.resolve(initPush(db, myUserId)).then(endPushPerf, endPushPerf);
         setupPushButton("enable-push-button");
@@ -465,7 +481,7 @@ async function openProfileModal(userId, startEditMode = false) {
   }
 
   try {
-    const userSnapshot = await getDoc(doc(db, "users_random", userId));
+    const userSnapshot = await hedged(() => getDoc(doc(db, "users_random", userId)));
     if (userSnapshot.exists()) {
       const userData = userSnapshot.data();
 
@@ -594,7 +610,8 @@ function hideLoadingOverlayNowForAppList() {
     selectionContainer.classList.remove("hidden");
   }
   perfMark("オーバーレイを閉じて一覧を表示");
-  perfShowReport({ isAdmin: meIsAdmin, page: "app.html（トーク一覧）" }); // ★ 管理者にだけ計測結果を表示
+  notifyPageLoadFinished(); // ★ この時点でOneSignalの初期化が未完了なら、「OneSignalを初期化中…」を表示する
+  perfShowReport({ isAdmin: meIsAdmin, page: "app.html（トーク一覧）", diagnostics: () => runFirestoreDiagnostics(myUserId) }); // ★ 管理者にだけ計測結果を表示
 }
 
 // ================================
@@ -636,7 +653,7 @@ function getUserDisplayName(userId) {
 // ★ 個人タブ用に全ユーザーを読み込む（名前・アイコンはユーザーキャッシュにも反映する）
 async function loadAllUsers() {
   try {
-    const snapshot = await getDocs(collection(db, "users_random"));
+    const snapshot = await hedged(() => getDocs(collection(db, "users_random")));
     allUsersList = snapshot.docs.map((doc) => {
       const d = doc.data() || {};
       setUserCache(doc.id, {
@@ -912,32 +929,24 @@ async function getAllTalkData() {
     userDocUnsubscribeForUnread();
   }
 
-  try {
-    // ★ まず自分の最終確認情報（lastChecked）を先に取得しておく。
-    //   これを待たずにルーム一覧の表示を始めると、一瞬「全部未読」→実際の数値、という
-    //   表示のチラつきが起きてしまうため、最初の描画より前に確定させる。
-    if (isInitialTalkListLoad) {
-      setLoadingStage("最終確認情報を読み込んでいます...", 15);
-    }
-    const initialUserSnapshot = await getDoc(doc(db, "users_random", myUserId));
-    currentUserLastCheckedMap = (initialUserSnapshot.data() || {}).lastChecked || {};
-    if (isInitialTalkListLoad) perfMark("lastChecked（最終確認情報）の取得");
-  } catch (error) {
-    console.error("最終確認情報の初期取得エラー:", error);
-  }
-
-  // ★ 個人タブに並べる全ユーザーを読み込む
+  // ★ 「自分のlastChecked」「全ユーザー一覧」「ルーム一覧」は、以前は1つずつ順番に待っていたが、
+  //   お互いに依存しないので同時に取得を始める。描画（ルーム一覧のコールバック）の直前で、
+  //   必要なデータが揃うのだけ待つ。
+  //   lastChecked は専用のgetDocをやめ、下の onSnapshot の最初の通知をそのまま使う（読み取りも1回減る）。
   if (isInitialTalkListLoad) {
-    setLoadingStage("ユーザー情報を読み込んでいます...", 25);
+    setLoadingStage("ユーザー情報・ルーム情報を読み込んでいます...", 25);
   }
-  await loadAllUsers();
-  if (isInitialTalkListLoad) perfMark("全ユーザー一覧の取得（loadAllUsers）");
 
-  // ★ 以降のlastChecked変更は、トーク一覧の更新とは独立してリアルタイム監視する
+  let resolveLastCheckedReady;
+  const lastCheckedReady = new Promise((resolve) => { resolveLastCheckedReady = resolve; });
+  const endLastCheckedPerf = perfStart("lastChecked（自分のユーザー文書の初回受信）");
+
   userDocUnsubscribeForUnread = onSnapshot(doc(db, "users_random", myUserId),
     (userDoc) => {
       const userData = userDoc.data() || {};
       currentUserLastCheckedMap = userData.lastChecked || {};
+      endLastCheckedPerf();
+      resolveLastCheckedReady();
 
       // 自分の既読状態が更新されたら、すでに表示中の全ルームの未読数を再計算する
       renderedRoomIds.forEach((roomId) => {
@@ -945,7 +954,13 @@ async function getAllTalkData() {
       });
     }, (error) => {
       console.error("最終確認情報の監視エラー:", error);
+      endLastCheckedPerf();
+      resolveLastCheckedReady(); // ★ 失敗しても一覧の表示は止めない
     });
+
+  const endUsersPerf = perfStart("全ユーザー一覧の取得（loadAllUsers）");
+  const usersReady = loadAllUsers().then(endUsersPerf, endUsersPerf);
+  const dataReady = Promise.all([lastCheckedReady, usersReady]);
 
   if (isInitialTalkListLoad) {
     setLoadingStage("トークルーム情報を読み込んでいます...", 35);
@@ -960,12 +975,19 @@ async function getAllTalkData() {
     }
     
     talkListenerUnsubscribe = onSnapshot(roomsQuery, async (talkSnapshot) => {
+        // ★ 永続キャッシュが空の初回は「キャッシュ由来の空」が先に届くことがあるので、サーバーの結果を待つ
+        if (isInitialTalkListLoad && talkSnapshot.metadata.fromCache && talkSnapshot.empty) return;
+
         // ★ このスナップショットが「初回のトーク一覧表示」かどうかを固定しておく
         const isThisInitialLoad = isInitialTalkListLoad;
         if (isThisInitialLoad) {
           isInitialTalkListLoad = false;
           perfMark("ルーム一覧の初回データ受信（onSnapshot）");
         }
+
+        // ★ 描画に必要な lastChecked と全ユーザー一覧が揃うのを待つ（並行して取得済みなので、通常はここで待たない）
+        await dataReady;
+        if (isThisInitialLoad) perfMark("lastChecked・全ユーザー一覧の到着待ち（ここが長ければ通信が詰まっている）");
 
         const changes = talkSnapshot.docChanges();
         const totalChanges = changes.length;
