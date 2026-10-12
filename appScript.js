@@ -1,4 +1,4 @@
-import { perfMark, perfStart, perfSample, perfNote, perfShowReport, perfWatchStall } from "./perf.js";
+import { perfMark, perfStart, perfSample, perfNote, perfNotifyReportAvailable, perfWatchStall } from "./perf.js";
 import { initPush, logoutPush, setupPushButton, sendProfileChangeNotification, notifyPageLoadFinished } from "./notify.js";
 
 import { runFirestoreDiagnostics } from "./diag.js";
@@ -611,7 +611,7 @@ function hideLoadingOverlayNowForAppList() {
   }
   perfMark("オーバーレイを閉じて一覧を表示");
   notifyPageLoadFinished(); // ★ この時点でOneSignalの初期化が未完了なら、「OneSignalを初期化中…」を表示する
-  perfShowReport({ isAdmin: meIsAdmin, page: "app.html（トーク一覧）", diagnostics: () => runFirestoreDiagnostics(myUserId) }); // ★ 管理者にだけ計測結果を表示
+  perfNotifyReportAvailable({ isAdmin: meIsAdmin, page: "app.html（トーク一覧）", diagnostics: () => runFirestoreDiagnostics(myUserId) }); // ★ 管理者にだけ、左上に「計測結果をみる」ボタンを1分間表示
 }
 
 // ================================

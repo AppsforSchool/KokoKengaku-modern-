@@ -1,4 +1,4 @@
-import { perfMark, perfStart, perfSample, perfNote, perfShowReport, perfWatchStall } from "./perf.js";
+import { perfMark, perfStart, perfSample, perfNote, perfNotifyReportAvailable, perfWatchStall } from "./perf.js";
 import { initPush, logoutPush, setupPushButton, sendMessageNotification, sendPushToUsers, sendProfileChangeNotification, notifyPageLoadFinished } from "./notify.js";
 
 import { runFirestoreDiagnostics } from "./diag.js";
@@ -556,7 +556,7 @@ function setLoadingStage(text, percent) {
 // ★ ローディングオーバーレイを即座に閉じ、裏に隠していたトーク本体を表示する
 function hideLoadingOverlayNow() {
   perfMark(initialLoadSkipped ? "「あとで読み込む」で表示（画像は未完了）" : "オーバーレイを閉じてトークを表示");
-  perfShowReport({ isAdmin: meIsAdmin, page: "talk.html（トーク画面）", diagnostics: () => runFirestoreDiagnostics(myUserId) }); // ★ 管理者にだけ計測結果を表示
+  perfNotifyReportAvailable({ isAdmin: meIsAdmin, page: "talk.html（トーク画面）", diagnostics: () => runFirestoreDiagnostics(myUserId) }); // ★ 管理者にだけ、左上に「計測結果をみる」ボタンを1分間表示
   loadingOverlay.classList.add("hidden");
   loadingOverlaySkipButton.classList.add("hidden");
   notifyPageLoadFinished(); // ★ この時点でOneSignalの初期化が未完了なら、「OneSignalを初期化中…」を表示する
