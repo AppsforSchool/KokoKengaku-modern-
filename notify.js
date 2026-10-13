@@ -27,13 +27,17 @@ async function loadKeys(db) {
 function withTimeout(promise, ms, message) {
   return Promise.race([
     promise,
-    new Promise((_, reject) => setTimeout(() => reject(new Error(typeof message === "function" ? message() : message)), ms))
+    new Promise((_, reject) => setTimeout(() => {
+      const error = new Error(typeof message === "function" ? message() : message);
+      error.isTimeout = true; // ★ 「待ちきれなかった」だけで、処理自体は裏で続いている（バッジを消さない判断に使う）
+      reject(error);
+    }, ms))
   ]);
 }
 
 // ★ 「OneSignalを初期化中…」バッジ
 //   ページの読み込みが終わった時点で、OneSignalの初期化がまだ終わっていなければ、画面左上（ヘッダーのすぐ下）に表示し、
-//   初期化が終わったら（成功でも失敗でも）消す。表示の対象は、ページを開いたときの最初の自動初期化だけで、
+//   初期化が終わったら消す（15秒のタイムアウトでは消さず、実際に終わるまで出し続ける。キー取得の失敗など、終わりようがない失敗のときは消す）。表示の対象は、ページを開いたときの最初の自動初期化だけで、
 //   「通知をオンにする」ボタンからの再試行中は出さない（ボタン側に進行状況が出るため）。
 let pushBadgeTracking = false;     // 最初の自動初期化を追跡中か
 let pushBadgeDone = false;         // その初期化が終わったか（成功・失敗とも）
@@ -60,6 +64,11 @@ export function initPush(db, userId) {
   initError = null;
   const trackBadge = !pushBadgeTracking && !pushBadgeDone; // ★ ページを開いたときの最初の初期化だけバッジの対象にする
   if (trackBadge) { pushBadgeTracking = true; updatePushBadge(); }
+  // ★ バッジは、OneSignalの初期化が「実際に終わった」とき（成功・失敗とも）に消す。
+  //   15秒のタイムアウトでは消さない（タイムアウトは通知ボタンの再試行用の区切りで、SDKの読み込み・初期化は裏で続いているため）。
+  const markBadgeDone = () => {
+    if (trackBadge && !pushBadgeDone) { pushBadgeDone = true; updatePushBadge(); }
+  };
   initPromise = (async () => {
     initStep = "Firestoreからキーを取得中";
     const { appId } = await loadKeys(db);
@@ -89,14 +98,15 @@ export function initPush(db, userId) {
         }
       });
     });
+    sdkReady.then(markBadgeDone, markBadgeDone); // ★ 15秒を過ぎても、SDKの初期化が終わった時点でバッジを消す
     await withTimeout(sdkReady, 15000, () => "OneSignalの準備が終わりませんでした。\n止まった段階: " + (initStep || "SDKの読み込み待ち（SDKが読み込めていない可能性）"));
   })().catch((e) => {
     initError = e;
     initPromise = null;   // 次回押したときに再試行できるようにする
     console.warn("プッシュ通知の初期化に失敗:", e);
-  }).finally(() => {
-    // ★ 成功・失敗のどちらでも、最初の初期化が終わったらバッジを消す
-    if (trackBadge) { pushBadgeDone = true; updatePushBadge(); }
+    // タイムアウト以外の失敗（キーの取得失敗、OneSignal.init のエラーなど）は、もう待っても終わらないのでバッジを消す。
+    // タイムアウトのときは、SDKの初期化を裏で待ち続けているので、バッジはそのまま出し続ける。
+    if (!(e && e.isTimeout)) markBadgeDone();
   });
   return initPromise;
 }
