@@ -610,7 +610,7 @@ function hideLoadingOverlayNowForAppList() {
     selectionContainer.classList.remove("hidden");
   }
   perfMark("オーバーレイを閉じて一覧を表示");
-  notifyPageLoadFinished(); // ★ この時点でOneSignalの初期化が未完了なら、「OneSignalを初期化中…」を表示する
+  notifyPageLoadFinished(); // ★ この時点でOneSignalの初期化が未完了なら、「通知の受信を準備中…」を表示する
   perfNotifyReportAvailable({ isAdmin: meIsAdmin, page: "app.html（トーク一覧）", diagnostics: () => runFirestoreDiagnostics(myUserId) }); // ★ 管理者にだけ、左上に「計測結果をみる」ボタンを1分間表示
 }
 

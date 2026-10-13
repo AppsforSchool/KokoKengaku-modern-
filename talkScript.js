@@ -559,7 +559,7 @@ function hideLoadingOverlayNow() {
   perfNotifyReportAvailable({ isAdmin: meIsAdmin, page: "talk.html（トーク画面）", diagnostics: () => runFirestoreDiagnostics(myUserId) }); // ★ 管理者にだけ、左上に「計測結果をみる」ボタンを1分間表示
   loadingOverlay.classList.add("hidden");
   loadingOverlaySkipButton.classList.add("hidden");
-  notifyPageLoadFinished(); // ★ この時点でOneSignalの初期化が未完了なら、「OneSignalを初期化中…」を表示する
+  notifyPageLoadFinished(); // ★ この時点でOneSignalの初期化が未完了なら、「通知の受信を準備中…」を表示する
   if (selectionContainer) {
     selectionContainer.classList.remove("hidden");
   }

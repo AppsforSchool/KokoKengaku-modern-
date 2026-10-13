@@ -1,5 +1,5 @@
 // ★ 画面左上（ヘッダーのすぐ下）に、読み込み中などの小さな通知（角丸の四角形）を縦に積んで出す共通部品。
-//   ・「OneSignalを初期化中…」（notify.js）、「画像を読み込み中…(a/b)」＋ゲージ（talkScript.js）、
+//   ・「通知の受信を準備中…」（notify.js）、「画像を読み込み中…(a/b)」＋ゲージ（talkScript.js）、
 //     「計測結果をみる」ボタン（perf.js、管理者のみ）が、同じ場所に縦に並ぶ。
 //   ・並び順は order で決める（小さいほうが上）。OneSignal = 1、画像 = 2、計測結果 = 3。
 //   ・消えるとき：フェードアウトしながら高さも0に縮め、下にあった通知が上に詰まる（同時に動く）。
@@ -129,7 +129,7 @@ function prepareBadge(el, order) {
   return el;
 }
 
-// ★ 文字だけの通知を作る（例：「OneSignalを初期化中…」）。作った時点では非表示
+// ★ 文字だけの通知を作る（例：「通知の受信を準備中…」）。作った時点では非表示
 export function createTextBadge(text, order) {
   const el = document.createElement("div");
   el.setAttribute("role", "status");
