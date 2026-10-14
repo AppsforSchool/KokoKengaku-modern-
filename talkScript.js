@@ -2,11 +2,15 @@ import { perfMark, perfStart, perfSample, perfNote, perfNotifyReportAvailable, p
 import { initPush, logoutPush, setupPushButton, sendMessageNotification, sendPushToUsers, sendProfileChangeNotification, notifyPageLoadFinished } from "./notify.js";
 
 import { runFirestoreDiagnostics } from "./diag.js";
-import { createGaugeBadge } from "./statusBadge.js";
+import { createGaugeBadge, createImageGroupTracker } from "./statusBadge.js";
 import { probeEnvironment, attachRecoveryButton } from "./recover.js";
 import { firestoreTransport, firestoreCacheMode, authStorageMode, hedged, auth, db, onAuthStateChanged, signOut, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, where, orderBy, onSnapshot, writeBatch, serverTimestamp, arrayUnion, arrayRemove, Timestamp, documentId } from "./firebase.js";
 
 perfMark("JSモジュールの読み込み・実行開始（HTML解析・Firebase等の取得）");
+
+// ★ トークルームのアイコン（ヘッダーのアイコン）の読み込み状況。読み込み画面を閉じた時点でまだ読めていなければ、左上に通知を出す
+//   （読み込み画面は完了を待たない）。ここでは数は付けない。
+const roomIconTracker = createImageGroupTracker("トークルームのアイコン", 2, false);
 
 let myUserId = "";
 let myUid = "";
@@ -560,6 +564,7 @@ function hideLoadingOverlayNow() {
   loadingOverlay.classList.add("hidden");
   loadingOverlaySkipButton.classList.add("hidden");
   notifyPageLoadFinished(); // ★ この時点でOneSignalの初期化が未完了なら、「通知の受信を準備中…」を表示する
+  roomIconTracker.finish(); // ★ アイコンが読み込み中なら、「トークルームのアイコンを読み込み中…」を表示する
   if (selectionContainer) {
     selectionContainer.classList.remove("hidden");
   }
@@ -576,7 +581,7 @@ const imageProgress = { loaded: 0, total: 0, active: false };
 function refreshImageBadge() {
   const show = initialLoadSkipped && imageProgress.active && imageProgress.loaded < imageProgress.total;
   if (!show && !imageBadge) return;
-  if (!imageBadge) imageBadge = createGaugeBadge(2); // order=2 ＝ OneSignalの表示（order=1）の下
+  if (!imageBadge) imageBadge = createGaugeBadge(4); // order=4 ＝ OneSignal(1)・トークルームのアイコン(2)の下
   if (show) {
     imageBadge.set(`画像を読み込み中…(${imageProgress.loaded}/${imageProgress.total})`, imageProgress.loaded / imageProgress.total);
     imageBadge.show();
@@ -659,7 +664,7 @@ function applyRoomHeader(roomData) {
   talkTitle.textContent = name;
   if (avatarHolder) {
     avatarHolder.innerHTML = "";
-    avatarHolder.appendChild(createAvatar(name, undefined, imageUrl));
+    avatarHolder.appendChild(roomIconTracker.track(createAvatar(name, undefined, imageUrl)));
   }
 }
 
@@ -1054,7 +1059,44 @@ async function getAllTalkData(talkId, preloadedRoomSnapshot) {
   }
 }
 
+// ★ <link>URL</link> の記法を、<a href="URL">URL</a> に展開する（sanitizeHtmlToOnlyLinks の前処理）。
+//   <link> は HTML では「中身を持たない特別なタグ」なので、そのまま DOMParser に渡すと、<link> が脱落して
+//   URL の文字だけが残ってしまう。そのため、パースの前に、文字列の段階で <a> に置き換えておく。
+//   ・<link> の中身（文字）が、そのままリンクの文字になり、同時に、リンク先(href)にもなる。
+//   ・中に <large> などの許可タグが入っていてもよい（href には、タグを除いた文字だけを使う）。
+//   ・http:// か https:// で始まらない場合は、https:// を補う（例: example.com → https://example.com）。
+//   ・javascript: など、http(s) 以外の形式や、空白を含む文字は、リンクにしない（<link> を取り除いて、文字だけ表示する）。
+function normalizeLinkUrl(text) {
+  const url = String(text || "").trim();
+  if (!url || /\s/.test(url)) return null;
+  if (/^https?:\/\//i.test(url)) return url;
+  if (/^[a-z][a-z0-9+.\-]*:(?!\d)/i.test(url)) return null; // javascript: など（example.com:8080 のようなポート指定は除く）
+  return "https://" + url.replace(/^\/\//, "");
+}
+
+// ★ <a href="..."> のリンク先として許可してよいかを判定する。
+//   ・許可：http: / https: / mailto: / tel: と、スキームのない相対リンク（talk.html?id=… や #… など）
+//   ・不許可：javascript: / data: / vbscript: など、それ以外のスキーム
+//   ブラウザは、スキームの途中に空白や改行・制御文字があっても無視して解釈する（例: "java\nscript:"）ため、
+//   判定の前に、それらを取り除いてから調べる。
+function isSafeHref(rawHref) {
+  const compact = String(rawHref || "").replace(/[\u0000-\u0020\u007f-\u009f]/g, "");
+  const scheme = compact.match(/^([a-z][a-z0-9+.\-]*):/i);
+  if (!scheme) return true; // スキームなし＝相対リンク
+  return ["http", "https", "mailto", "tel"].includes(scheme[1].toLowerCase());
+}
+
+function expandLinkTags(rawMessage) {
+  return String(rawMessage).replace(/<link>([\s\S]*?)<\/link>/gi, (whole, inner) => {
+    const url = normalizeLinkUrl(stripTagsToPlainText(inner));
+    if (!url) return inner; // リンクにできないときは、<link> だけを取り除く
+    const safeHref = url.replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    return `<a href="${safeHref}">${inner}</a>`;
+  });
+}
+
 function sanitizeHtmlToOnlyLinks(htmlString) {
+  htmlString = expandLinkTags(htmlString); // ★ <link>URL</link> を <a> に展開してから、パースする
   const parser = new DOMParser();
   const doc = parser.parseFromString(htmlString, 'text/html');
   const box = document.createDocumentFragment();
@@ -1073,12 +1115,17 @@ function sanitizeHtmlToOnlyLinks(htmlString) {
 
       // 各タグに応じた要素の生成
       if (tagName === 'A') {
-        resultElement = document.createElement('a');
         const rawHref = node.getAttribute('href') || '#';
-        resultElement.setAttribute('href', rawHref);
-        resultElement.setAttribute('target', '_blank');
-        resultElement.setAttribute('rel', 'noopener noreferrer');
-        resultElement.classList.add('chat-link');
+        if (isSafeHref(rawHref)) {
+          resultElement = document.createElement('a');
+          resultElement.setAttribute('href', rawHref);
+          resultElement.setAttribute('target', '_blank');
+          resultElement.setAttribute('rel', 'noopener noreferrer');
+          resultElement.classList.add('chat-link');
+        } else {
+          // ★ javascript: など危険なリンク先は、リンクにせず、文字だけを表示する
+          resultElement = document.createElement('span');
+        }
       } 
       else if (tagName === 'UNDERLINE') {
         resultElement = document.createElement('span');
@@ -1266,7 +1313,7 @@ function notifyRoom(text, replyTargetId = replyToId) {
     memberIds: currentRoomMembers,
     senderId: myUserId,
     senderName: drawerUsername.textContent,
-    text,
+    text: stripTagsToPlainText(text), // ★ <link>・<a>・<large> などのタグは、通知には出さず、文字だけを送る
     replyToUserId,
     replyToName
   });

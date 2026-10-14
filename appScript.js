@@ -2,10 +2,16 @@ import { perfMark, perfStart, perfSample, perfNote, perfNotifyReportAvailable, p
 import { initPush, logoutPush, setupPushButton, sendProfileChangeNotification, notifyPageLoadFinished } from "./notify.js";
 
 import { runFirestoreDiagnostics } from "./diag.js";
+import { createImageGroupTracker } from "./statusBadge.js";
 import { probeEnvironment, attachRecoveryButton } from "./recover.js";
 import { firestoreTransport, firestoreCacheMode, authStorageMode, hedged, auth, db, onAuthStateChanged, signOut, collection, doc, getDoc, getDocs, addDoc, setDoc, updateDoc, query, where, onSnapshot, serverTimestamp, getCountFromServer } from "./firebase.js";
 
 perfMark("JSモジュールの読み込み・実行開始（HTML解析・Firebase等の取得）");
+
+// ★ アイコン画像の読み込み状況（読み込み画面を閉じた時点で、まだ読めていなければ、左上に通知を出す）
+//   これらの画像は、一覧を組み立てた時点で読み込みが始まっているが、読み込み画面は完了を待たない（待つと表示が遅くなるため）。
+const userIconTracker = createImageGroupTracker("ユーザーのアイコン", 2, true);
+const roomIconTracker = createImageGroupTracker("トークルームのアイコン", 3, true);
 
 let myUid = "";
 let myUserId = "";
@@ -611,6 +617,8 @@ function hideLoadingOverlayNowForAppList() {
   }
   perfMark("オーバーレイを閉じて一覧を表示");
   notifyPageLoadFinished(); // ★ この時点でOneSignalの初期化が未完了なら、「通知の受信を準備中…」を表示する
+  userIconTracker.finish(); // ★ アイコンが読み込み中なら、「ユーザーのアイコンを読み込み中…(n/m)」を表示する
+  roomIconTracker.finish(); // ★ 同様に「トークルームのアイコンを読み込み中…(n/m)」
   perfNotifyReportAvailable({ isAdmin: meIsAdmin, page: "app.html（トーク一覧）", diagnostics: () => runFirestoreDiagnostics(myUserId) }); // ★ 管理者にだけ、左上に「計測結果をみる」ボタンを1分間表示
 }
 
@@ -798,7 +806,7 @@ function createPersonalButton(user, room, isSelf) {
   talkButton.classList.add("talk-button");
   if (!room) talkButton.classList.add("no-room");
 
-  talkButton.appendChild(createAvatar(displayName, undefined, cached.imageUrl || ""));
+  talkButton.appendChild(userIconTracker.track(createAvatar(displayName, undefined, cached.imageUrl || ""))); // ★ 個人トーク＝ユーザーのアイコン
 
   const titleArea = document.createElement("p");
   titleArea.classList.add("title");
@@ -867,7 +875,7 @@ function createGroupButton(roomId, roomData) {
     window.location.href = `./talk.html?id=${roomId}`;
   });
 
-  talkButton.appendChild(createAvatar(roomData.title, undefined, roomData.imageUrl || ""));
+  talkButton.appendChild(roomIconTracker.track(createAvatar(roomData.title, undefined, roomData.imageUrl || ""))); // ★ グループ＝トークルームのアイコン
   talkButton.dataset.avatarKey = `${roomData.title}|${roomData.imageUrl || ""}`;
 
   const titleArea = document.createElement("p");
@@ -897,7 +905,7 @@ function updateGroupButton(talkButton, roomData) {
   const avatarKey = `${roomData.title}|${roomData.imageUrl || ""}`;
   if (talkButton.dataset.avatarKey !== avatarKey) {
     const oldAvatar = talkButton.querySelector(".avatar-circle");
-    const newAvatar = createAvatar(roomData.title, undefined, roomData.imageUrl || "");
+    const newAvatar = roomIconTracker.track(createAvatar(roomData.title, undefined, roomData.imageUrl || ""));
     if (oldAvatar) oldAvatar.replaceWith(newAvatar);
     else talkButton.prepend(newAvatar);
     talkButton.dataset.avatarKey = avatarKey;
