@@ -678,8 +678,8 @@ async function loadAllUsers() {
       };
     }).filter((u) => u.isActive).sort((a, b) => a.no - b.no);
 
-    // グループ作成モーダルのメンバー選択にも使い回す（自分は自動追加なので除く）
-    allUsersCache = allUsersList.filter((u) => u.userId !== myUserId);
+    // グループ作成モーダルのメンバー選択にも使い回す（自分も選択肢に含める。自動では追加しない）
+    allUsersCache = allUsersList.slice();
   } catch (error) {
     console.error("ユーザー一覧の取得エラー:", error);
   }
@@ -1263,9 +1263,10 @@ async function openCreateTalkModal() {
       .map((doc) => ({
         userId: doc.id,
         name: (doc.data() || {}).name || doc.id,
-        no: typeof (doc.data() || {}).no === "number" ? doc.data().no : Infinity
+        no: typeof (doc.data() || {}).no === "number" ? doc.data().no : Infinity,
+        isActive: (doc.data() || {}).isActive !== false
       }))
-      .filter((u) => u.userId !== myUserId) // ★ 自分は自動的にメンバーへ入るので選択肢からは除く
+      .filter((u) => u.isActive) // ★ 自分も選択肢に含める（自動では追加しない）。停止中のアカウントは除く
       // ★ no順（無ければ最後）に並べる
       .sort((a, b) => a.no - b.no);
 
@@ -1322,11 +1323,11 @@ function renderCreateTalkMemberList(filterText) {
 // ★ タイトルが空でなければ作成ボタンを有効化する
 function updateCreateTalkSubmitState() {
   const hasTitle = createTalkTitleInput && createTalkTitleInput.value.trim() !== "";
-  // ★ グループは3人以上なので、自分以外を2人以上選ぶ必要がある
+  // ★ グループは3人以上なので、3人以上を選ぶ必要がある（自分も、必要なら自分で選ぶ）
   const selectedCount = createTalkMemberList
     ? createTalkMemberList.querySelectorAll("input[type=checkbox]:checked").length
     : 0;
-  createTalkSubmitButton.disabled = !(hasTitle && selectedCount >= 2);
+  createTalkSubmitButton.disabled = !(hasTitle && selectedCount >= 3);
 }
 
 // ★ 実際にKokoKengakuへ新しいルームを作成する
@@ -1337,10 +1338,10 @@ async function handleCreateTalk() {
   const selectedMemberIds = Array.from(
     createTalkMemberList.querySelectorAll("input[type=checkbox]:checked")
   ).map((cb) => cb.value);
-  if (selectedMemberIds.length < 2) return; // グループは3人以上（自分＋2人以上）
+  if (selectedMemberIds.length < 3) return; // グループは3人以上
 
-  // ★ 自分（作成者）は必ずメンバーに含める
-  const members = Array.from(new Set([...selectedMemberIds, myUserId]));
+  // ★ 選んだ人だけをメンバーにする（作成者も、自分で選ばなければ入らない。管理者は全トークを見られる）
+  const members = Array.from(new Set(selectedMemberIds));
 
   createTalkSubmitButton.disabled = true;
   createTalkSubmitButton.textContent = "作成中...";

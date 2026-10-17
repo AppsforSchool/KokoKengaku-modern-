@@ -1111,6 +1111,19 @@ div, p {
   text-align: left;
 }
 
+/* ★ 新UIの .profile-label は、プロフィール画面（縦に並べて gap で間隔をあける flex 配置）専用に作られていて、
+      margin-bottom: -0.3rem（下の要素に少し食い込ませる）を持っている。
+      このモーダルは、普通の縦並び（block配置）で gap がないため、ラベルが下の入力欄に重なって崩れて見えていた。
+      余白を、このモーダルの中だけ普通の値に戻す（旧UIは余白が正の値なので、もともと崩れない）。 */
+#create-talk-modal .profile-label {
+  display: block;
+  margin: 0 0 0.45rem;
+}
+/* 検索欄と、メンバー一覧（または「読み込み中」）の間のすき間 */
+#create-talk-member-search {
+  margin-bottom: 0.6rem;
+}
+
 #create-talk-title-input,
 #create-talk-member-search {
   font-family: "BIZ UDGothic", sans-serif;
