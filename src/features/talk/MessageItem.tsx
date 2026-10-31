@@ -1,0 +1,187 @@
+import { memo, useEffect, useRef, useState } from 'react'
+import { Avatar } from '../../components/Avatar'
+import { PollWidget } from './PollWidget'
+import type { MessageView } from './types'
+
+// ★ メッセージ1件の表示（既存の talkScript.js の buildMessageElement と同じHTML構造・クラス）。
+//   ・本文・画像・返信元・既読・アンケート（③）、編集・転送・選択（④）を表示する。
+
+const REPLY_MARK = '↩\uFE0E'
+
+interface Props {
+	view: MessageView
+	/** この直前に、未読の区切り線（「ここから未読」）を出すか。 */
+	showUnreadDivider: boolean
+	onOpenProfile: (userId: string | undefined) => void
+	onOpenReadBy: (readBy: string[]) => void
+	onStartReply: (docId: string, senderName: string) => void
+	onJump: (targetId: string) => void
+	myUserId: string
+	onVotePoll: (messageId: string, selectedIndex: number, hadMyAnswer: boolean) => Promise<void>
+	onOpenPollVoters: (answerMap: Record<string, unknown>, choiceIndex: number, choiceLabel: string) => void
+	meIsAdmin: boolean
+	/** 一括選択で、このメッセージが選ばれているか。 */
+	selected: boolean
+	onEdit: (view: MessageView) => void
+	onForward: (view: MessageView) => void
+	onToggleSelect: (messageId: string, checked: boolean) => void
+}
+
+/** 未読区切り線（既存の buildUnreadDivider と同じ構造）。 */
+function UnreadDivider() {
+	return (
+		<div id="unread-divider" className="unread-divider">
+			<span className="unread-divider-line"></span>
+			<span className="unread-divider-label">ここから未読</span>
+			<span className="unread-divider-line"></span>
+		</div>
+	)
+}
+
+/** 送信された画像。実際の画像の縦横比が分かったら、枠の縦横比をそれに合わせる（既存の load の処理と同じ）。 */
+function MessageImage({ src }: { src: string }) {
+	const ref = useRef<HTMLImageElement>(null)
+	const [ratio, setRatio] = useState<string | null>(null)
+
+	const applyNaturalSize = (img: HTMLImageElement) => {
+		if (img.naturalWidth > 0 && img.naturalHeight > 0) setRatio(`${img.naturalWidth} / ${img.naturalHeight}`)
+	}
+	// 表示される前に読み終わっていた場合（キャッシュなど）にも、縦横比を合わせる
+	useEffect(() => {
+		const img = ref.current
+		if (img && img.complete) applyNaturalSize(img)
+	}, [src])
+
+	return (
+		<img
+			ref={ref}
+			className={'message-image' + (ratio ? ' loaded' : '')}
+			style={ratio ? { aspectRatio: ratio } : undefined}
+			src={src}
+			alt="送信された画像"
+			onLoad={(e) => applyNaturalSize(e.currentTarget)}
+		/>
+	)
+}
+
+function MessageItemBase({ view, showUnreadDivider, onOpenProfile, onOpenReadBy, onStartReply, onJump, myUserId, onVotePoll, onOpenPollVoters, meIsAdmin, selected, onEdit, onForward, onToggleSelect }: Props) {
+	const replyIcon = (
+		<span className="reply-action" title="返信" onClick={() => onStartReply(view.id, view.senderName)}>
+			{REPLY_MARK}
+		</span>
+	)
+
+	// 「編集」「選択」は、管理者、または自分のメッセージだけ。「転送」は、管理者だけ
+	const canEdit = meIsAdmin || view.data.userId === myUserId
+
+	let senderClass = 'clickable-user'
+	if (view.senderIsAdmin) senderClass += ' admin'
+	else if (view.senderHasPrize) senderClass += ' prize'
+
+	return (
+		<>
+			{showUnreadDivider && <UnreadDivider />}
+			<div id={'msg-' + view.id} className={'message ' + (view.isOwn ? 'message-own' : 'message-other')}>
+				<div className="message-row">
+					{!view.isOwn && (
+						<Avatar
+							name={view.senderName}
+							imageUrl={view.senderImageUrl}
+							extraClassName="clickable-user"
+							onClick={() => onOpenProfile(view.userId)}
+						/>
+					)}
+					<div className="bubble-col">
+						<p className="message-user">
+							{/* 自分の発言では、吹き出しの上に自分の名前を出さない（相手の発言のみ表示） */}
+							{!view.isOwn && (
+								<span className={senderClass} onClick={() => onOpenProfile(view.userId)}>{`${view.senderName} `}</span>
+							)}
+							<span>{`${view.displayTime} `}</span>
+							<span style={{ textDecoration: 'underline', cursor: 'pointer' }} onClick={() => onOpenReadBy(view.readBy)}>
+								{`既読:${view.readBy.length}人`}
+							</span>
+							{canEdit && (
+								<>
+									{' '}
+									<span style={{ textDecoration: 'underline', cursor: 'pointer' }} onClick={() => onEdit(view)}>
+										編集
+									</span>
+								</>
+							)}
+							{meIsAdmin && (
+								<>
+									{' '}
+									<span style={{ textDecoration: 'underline', cursor: 'pointer' }} onClick={() => onForward(view)}>
+										転送
+									</span>
+								</>
+							)}
+							{/* 一括選択用チェックボックス（削除・転送をまとめて行う。選択できる範囲は編集と同じ権限） */}
+							{canEdit && (
+								<>
+									{' '}
+									<label className="message-select-label">
+										<input
+											type="checkbox"
+											className="message-select-checkbox"
+											checked={selected}
+											onChange={(e) => onToggleSelect(view.id, e.target.checked)}
+										/>
+										選択
+									</label>
+								</>
+							)}
+						</p>
+
+						{/* 表示順：送信者・日付など → 返信元のメッセージ → 今回のメッセージ */}
+						{view.reply && (
+							<div className="reply-context">
+								<p className="reply-context-label">{view.reply.label}</p>
+								{view.reply.missing ? (
+									<div className="reply-context-quote reply-context-quote-missing">{view.reply.snippet}</div>
+								) : (
+									<div
+										className={'reply-context-quote ' + (view.reply.tone === 'own' ? 'reply-context-quote-own' : 'reply-context-quote-other')}
+										onClick={() => onJump(view.reply!.targetId)}
+									>
+										{view.reply.snippet}
+									</div>
+								)}
+							</div>
+						)}
+
+						{/* 画像は吹き出しの外に、その下にテキストがあれば吹き出しで表示する */}
+						{view.imageUrl && <MessageImage src={view.imageUrl} />}
+
+						{/* テキスト本文＋返信矢印を横並びに配置する */}
+						{view.hasText && (
+							<div className="bubble-content-row">
+								<p className="message-text">{view.textNode}</p>
+								{replyIcon}
+							</div>
+						)}
+
+						{/* アンケートがあれば、テキストの下にアンケートを表示する */}
+						{Array.isArray(view.data.choices) && view.data.choices.length > 0 && (
+							<PollWidget
+								key={view.seq}
+								messageId={view.id}
+								choices={view.data.choices}
+								answerMap={(view.data.answer as Record<string, unknown>) || {}}
+								myUserId={myUserId}
+								onVote={onVotePoll}
+								onOpenVoters={onOpenPollVoters}
+							/>
+						)}
+
+						{/* テキストが無いメッセージ（画像単独・アンケート単独）にも返信矢印を出す */}
+						{!view.hasText && <div className="bubble-content-row standalone-reply-row">{replyIcon}</div>}
+					</div>
+				</div>
+			</div>
+		</>
+	)
+}
+
+export const MessageItem = memo(MessageItemBase)
