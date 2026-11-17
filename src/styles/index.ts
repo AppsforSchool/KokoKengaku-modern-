@@ -5,6 +5,8 @@
 import './base.css'
 import './new/login.css'
 import './old/login.css'
+import './viewAs.css' // 【SPAで追加した機能】管理者が、他のアカウントとして閲覧する
+import './qrImage.css' // 【SPAで追加した機能】ログイン画面の「画像から読み取る」ボタン（既存のCSSは、無改変のため、分けてある）
 import './new/app.css'
 import './old/app.css'
 import './new/talk.css'

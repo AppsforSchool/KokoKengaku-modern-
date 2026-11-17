@@ -7,6 +7,8 @@ import { useDialog } from '../ui/DialogProvider'
 //   ・text … 段階を示す文言。percent を渡すと、その下に進捗バーを出す（0〜100）。
 //   ・watchStall … 読み込みが12秒たっても終わらないとき、「どの段階で止まっているか」を表示し、
 //     「ログイン情報をリセットして再試行」ボタンを出す（既存の perfWatchStall + attachRecoveryButton と同じ）。
+//   ・paused … 【SPAで追加】停止の判定を止める。画像の読み込み待ちなど、時間がかかっても、通信が止まっているわけではない段階で使う。
+//     止めた時点で、すでに出ていた停止の表示・復旧ボタンも、消す。
 
 const RECOVER_BUTTON_STYLE: CSSProperties = {
 	marginTop: '1rem',
@@ -49,12 +51,14 @@ interface Props {
 	percent?: number
 	hidden?: boolean
 	watchStall?: boolean
+	/** 停止の判定を止める（画像の読み込み待ちなど）。 */
+	paused?: boolean
 	/** 「あとで読み込む」ボタン（トーク画面だけ）。onSkip を渡したときだけ、ボタンの場所ができる。showSkip で表示を切り替える。 */
 	onSkip?: () => void
 	showSkip?: boolean
 }
 
-export function LoadingOverlay({ text, percent, hidden = false, watchStall = false, onSkip, showSkip = false }: Props) {
+export function LoadingOverlay({ text, percent, hidden = false, watchStall = false, paused = false, onSkip, showSkip = false }: Props) {
 	const [stallText, setStallText] = useState<string | null>(null)
 	const [stalled, setStalled] = useState(false) // 復旧ボタンは、一度出たら残す（既存の attachRecoveryButton と同じ）
 
@@ -63,8 +67,15 @@ export function LoadingOverlay({ text, percent, hidden = false, watchStall = fal
 		setStallText(null)
 	}, [text])
 
+	// 判定を止めたら、すでに出ていた停止の表示と復旧ボタンも消す
 	useEffect(() => {
-		if (!watchStall || hidden) return
+		if (!paused) return
+		setStalled(false)
+		setStallText(null)
+	}, [paused])
+
+	useEffect(() => {
+		if (!watchStall || hidden || paused) return
 		let envText = ''
 		return perfWatchStall(
 			() => false, // 終わったら、このコンポーネントが外れて、後片付けで止まる
@@ -81,7 +92,7 @@ export function LoadingOverlay({ text, percent, hidden = false, watchStall = fal
 				}
 			},
 		)
-	}, [watchStall, hidden])
+	}, [watchStall, hidden, paused])
 
 	const clamped = typeof percent === 'number' ? Math.max(0, Math.min(100, percent)) : null
 

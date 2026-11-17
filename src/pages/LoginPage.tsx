@@ -4,14 +4,18 @@ import { useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthProvider'
 import { LoadingOverlay } from '../components/LoadingOverlay'
 import { PageShell } from '../components/PageShell'
+import { decodeQrFromImageFile } from '../lib/qrImage'
 import { UiSwitchSection } from '../ui/UiSwitchSection'
 
 // ★ ログイン画面。既存の index.html + script.js と同じHTML構造・同じ挙動。
 //   ・ログイン済みなら、ログイン画面を出さずに、元の画面（なければルーム一覧）へ進む。
-//   ・ID + パスワード、または QRコード（「ID パスワード」の形式）で入力できる。
+//   ・ID + パスワード、または QRコード（「ID パスワード」の形式）で入力できる。QRは、カメラでの読み取りのほか、
+//     【SPAで追加】「画像から読み取る」で、画像ファイル（写真・スクリーンショット）からも読み取れる（lib/qrImage.ts）。
 //   ・「アカウント情報」から、ログインしていない状態用のドロワー（新UI/旧UIのトグルだけ）を開く。
 
 const QR_READER_ID = 'login-qr-reader'
+const QR_UNSUPPORTED_MESSAGE = '非対応のQRコードです｡'
+const QR_NOT_FOUND_MESSAGE = 'QRコードを読み取れませんでした。'
 
 export default function LoginPage() {
 	const { user, loading, login } = useAuth()
@@ -25,6 +29,11 @@ export default function LoginPage() {
 
 	const [qrOpen, setQrOpen] = useState(false)
 	const [qrFailed, setQrFailed] = useState(false)
+	const [qrFailMessage, setQrFailMessage] = useState(QR_UNSUPPORTED_MESSAGE)
+	const [qrImageReading, setQrImageReading] = useState(false) // 画像の読み取り中
+	const qrImageInputRef = useRef<HTMLInputElement>(null)
+	const scanStartRef = useRef<Promise<void>>(Promise.resolve()) // カメラの起動処理（起動の途中で、画像を選ばれた場合に、待つため）
+	const qrReadToken = useRef(0) // 画像の読み取りが、閉じられたあとに終わった場合に、無視するための番号
 	const [shareOpen, setShareOpen] = useState(false)
 	const [drawerOpen, setDrawerOpen] = useState(false)
 
@@ -56,6 +65,7 @@ export default function LoginPage() {
 			setPassword(parts[1])
 			setQrOpen(false)
 		} else {
+			setQrFailMessage(QR_UNSUPPORTED_MESSAGE)
 			setQrFailed(true) // 非対応のQRコード
 		}
 	}, [])
@@ -81,9 +91,50 @@ export default function LoginPage() {
 			console.error('カメラ起動エラー:', err)
 			alert('カメラの起動に失敗しました。ブラウザの権限を確認してください。')
 			await stopScan()
-			setQrOpen(false)
+			// 【SPAで変更】モーダルは閉じない（既存は、ここで閉じていた）。カメラが使えない端末（カメラのないPCなど）でも、
+			//   「画像から読み取る」を使えるようにするため。
 		}
 	}, [inputQrData, stopScan])
+
+	/** カメラでの読み取りを始める（起動の完了を、待てるようにしておく）。 */
+	const beginScan = useCallback(() => {
+		const started = startScan()
+		scanStartRef.current = started
+		return started
+	}, [startScan])
+
+	/** モーダルを閉じる（カメラを止め、画像の読み取り中なら、その結果は使わない）。 */
+	const closeQrModal = useCallback(() => {
+		qrReadToken.current += 1
+		setQrImageReading(false)
+		setQrOpen(false)
+		void stopScan()
+	}, [stopScan])
+
+	/** 選んだ画像の中のQRコードを読み取る（【SPAで追加】）。カメラの読み取り中は、画像の読み取りができないので、先に止める。 */
+	const handleQrImage = useCallback(
+		async (file: File) => {
+			const myRead = ++qrReadToken.current
+			setQrFailed(false)
+			setQrImageReading(true)
+			await scanStartRef.current // カメラの起動の途中なら、起動を待ってから止める
+			await stopScan()
+			try {
+				const decoded = await decodeQrFromImageFile(file, QR_READER_ID)
+				if (myRead !== qrReadToken.current) return // 読み取り中に、閉じられた
+				console.log('画像から読み取り成功')
+				inputQrData(decoded)
+			} catch (err) {
+				if (myRead !== qrReadToken.current) return
+				console.error('画像からのQR読み取りエラー:', err)
+				setQrFailMessage(QR_NOT_FOUND_MESSAGE)
+				setQrFailed(true)
+			} finally {
+				if (myRead === qrReadToken.current) setQrImageReading(false)
+			}
+		},
+		[inputQrData, stopScan],
+	)
 
 	// ページを離れるときは、カメラを止める
 	useEffect(() => () => void stopScan(), [stopScan])
@@ -119,10 +170,7 @@ export default function LoginPage() {
 						<span
 							id="qr-login-modal-close"
 							className="close-button"
-							onClick={() => {
-								setQrOpen(false)
-								void stopScan()
-							}}
+							onClick={closeQrModal}
 						>
 							&times;
 						</span>
@@ -130,13 +178,37 @@ export default function LoginPage() {
 					<div className="modal-scroll-body">
 						<div id={QR_READER_ID} style={{ width: '100%', maxWidth: '500px', margin: 'auto' }}></div>
 
+						{/* 【SPAで追加】画像ファイルからの読み取り */}
+						<div id="qr-login-image-area">
+							<input
+								ref={qrImageInputRef}
+								type="file"
+								id="qr-login-image-input"
+								accept="image/*"
+								style={{ display: 'none' }}
+								onChange={(e) => {
+									const file = e.target.files && e.target.files[0]
+									e.target.value = '' // 同じ画像を、続けて選べるようにする
+									if (file) void handleQrImage(file)
+								}}
+							/>
+							<button
+								id="qr-login-image-button"
+								type="button"
+								disabled={qrImageReading}
+								onClick={() => qrImageInputRef.current?.click()}
+							>
+								{qrImageReading ? '読み取り中...' : '画像から読み取る'}
+							</button>
+						</div>
+
 						<div id="qr-login-failure" className={qrFailed ? undefined : 'hidden'}>
-							<p>非対応のQRコードです｡</p>
+							<p>{qrFailMessage}</p>
 							<button
 								id="qr-login-retry"
 								onClick={() => {
 									setQrFailed(false)
-									void startScan()
+									void beginScan()
 								}}
 							>
 								もう一度
@@ -196,7 +268,7 @@ export default function LoginPage() {
 							id="qr-login-button"
 							onClick={() => {
 								setQrOpen(true)
-								void startScan()
+								void beginScan()
 							}}
 						>
 							QRコードで入力

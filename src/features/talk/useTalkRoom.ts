@@ -34,8 +34,12 @@ import type { MessageData, MessageView, ReplyContextView } from './types'
 //       KokoKengaku/{ルームID}/talk/{メッセージID}  updateDoc  { readBy: arrayUnion(自分) }
 
 export interface TalkRoomStart {
+	/** 画面の「見え方」の基準になるユーザー（誰のメッセージを、自分のものとして、右に出すか）。他のアカウントとして閲覧中は、そのアカウント。 */
 	myUserId: string
+	/** 本当のアカウントが管理者か。 */
 	meIsAdmin: boolean
+	/** 【SPAで追加】他のアカウントとして閲覧中。既読（readBy）・最終確認日時（lastChecked）・未読数（unreadCounts）を、書き込まない。 */
+	readOnly?: boolean
 	/** このセッションを開いた時点での、自分の最終確認日時。未読の区切り線の基準（あとで更新されても、上書きしない）。 */
 	initialLastChecked: Date | null
 }
@@ -70,6 +74,7 @@ export function useTalkRoom({ talkId, start, roomIconTracker, showError, onRoomN
 	const [overlayHidden, setOverlayHidden] = useState(false)
 	const [contentVisible, setContentVisible] = useState(false) // トーク本体（読み込み完了までは非表示）
 	const [showSkip, setShowSkip] = useState(false)
+	const [imageWaiting, setImageWaiting] = useState(false) // 画像の読み込み待ちの間（この間は、「止まっている」の判定をしない）
 
 	// ---- 画面の内容 ----
 	const [header, setHeader] = useState<RoomHeader | null>(null)
@@ -88,6 +93,7 @@ export function useTalkRoom({ talkId, start, roomIconTracker, showError, onRoomN
 	const skippedRef = useRef(false) // 「あとで読み込む」が押されたか
 	const meIsAdminRef = useRef(false)
 	const initialLastCheckedRef = useRef<Date | null>(null)
+	const readOnlyRef = useRef(false) // 他のアカウントとして閲覧中（既読などを書き込まない）
 	const unreadDividerIdRef = useRef<string | null>(null)
 	const messagesByIdRef = useRef<Record<string, MessageData>>({})
 	const viewsByIdRef = useRef<Map<string, MessageView>>(new Map())
@@ -134,6 +140,7 @@ export function useTalkRoom({ talkId, start, roomIconTracker, showError, onRoomN
 		})
 		setOverlayHidden(true)
 		setShowSkip(false)
+		setImageWaiting(false)
 		notifyPageLoadFinished() // この時点でOneSignalの初期化が未完了なら、「通知の受信を準備中…」を表示する
 		roomIconTracker.finish() // アイコンが読み込み中なら、「トークルームのアイコンを読み込み中…」を表示する
 		setContentVisible(true)
@@ -176,6 +183,7 @@ export function useTalkRoom({ talkId, start, roomIconTracker, showError, onRoomN
 			if (!skippedRef.current) {
 				setLoadingText(`画像を読み込んでいます (0/${total})`)
 				setShowSkip(true)
+				setImageWaiting(true) // 画像の読み込みは、時間がかかっても、通信の停止ではない → 停止の表示・復旧ボタンを出さない
 			}
 			refreshImageBadge() // すでに「あとで読み込む」済みなら、ここで表示される
 
@@ -312,7 +320,7 @@ export function useTalkRoom({ talkId, start, roomIconTracker, showError, onRoomN
 
 			// 他の人のメッセージを見たら、既読にする
 			const readByList = messageData.readBy || []
-			if (messageData.userId !== myUserId && !readByList.includes(myUserId)) {
+			if (!readOnlyRef.current && messageData.userId !== myUserId && !readByList.includes(myUserId)) {
 				updateDoc(doc(db, 'KokoKengaku', talkId, 'talk', docId), {
 					readBy: arrayUnion(myUserId),
 				}).catch((err) => console.error('既読更新エラー:', err))
@@ -476,7 +484,7 @@ export function useTalkRoom({ talkId, start, roomIconTracker, showError, onRoomN
 					talkAreaRef.current.scrollTop = talkAreaRef.current.scrollHeight
 				}
 
-				void updateLastCheckedTime(myUserId)
+				if (!readOnlyRef.current) void updateLastCheckedTime(myUserId)
 			})
 			if (!isAlive()) return
 
@@ -512,6 +520,7 @@ export function useTalkRoom({ talkId, start, roomIconTracker, showError, onRoomN
 		const { myUserId } = start
 		meIsAdminRef.current = start.meIsAdmin
 		initialLastCheckedRef.current = start.initialLastChecked
+		readOnlyRef.current = !!start.readOnly
 
 		void (async () => {
 			try {
@@ -537,10 +546,12 @@ export function useTalkRoom({ talkId, start, roomIconTracker, showError, onRoomN
 
 				applyRoomHeader(roomSnapshot.data() as DocumentData, myUserId)
 
-				// 入ったので、このルームの未読数を0にする
-				updateDoc(doc(db, 'users_random', myUserId), {
-					[`unreadCounts.${talkId}`]: 0,
-				}).catch((err) => console.error('未読リセットエラー:', err))
+				// 入ったので、このルームの未読数を0にする（他のアカウントとして閲覧中は、書き込まない）
+				if (!readOnlyRef.current) {
+					updateDoc(doc(db, 'users_random', myUserId), {
+						[`unreadCounts.${talkId}`]: 0,
+					}).catch((err) => console.error('未読リセットエラー:', err))
+				}
 
 				subscription.unsubscribe = onSnapshot(query(collection(db, 'KokoKengaku', talkId, 'talk'), orderBy('time', 'asc')), (messageSnapshot) => {
 					handleMessageSnapshot(messageSnapshot, myUserId, isAlive).catch((error) => console.error('メッセージの表示エラー:', error))
@@ -573,6 +584,7 @@ export function useTalkRoom({ talkId, start, roomIconTracker, showError, onRoomN
 		overlayHidden,
 		contentVisible,
 		showSkip,
+		imageWaiting,
 		skipLoading,
 		hideOverlayOnly,
 		setRoomImageUrl,

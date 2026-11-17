@@ -4,6 +4,7 @@ import { HashRouter } from 'react-router-dom'
 import App from './App'
 import { AuthProvider } from './auth/AuthProvider'
 import './styles' // すべてのCSS（順序が大切なので、1か所で読み込む）
+import { ViewAsProvider } from './features/viewAs/ViewAsProvider'
 import { DialogProvider } from './ui/DialogProvider'
 import { UiModeProvider } from './ui/UiModeProvider'
 import { perfMark } from './lib/perf'
@@ -14,11 +15,13 @@ createRoot(document.getElementById('root')!).render(
 	<StrictMode>
 		<UiModeProvider>
 			<AuthProvider>
-				<DialogProvider>
-					<HashRouter>
-						<App />
-					</HashRouter>
-				</DialogProvider>
+				<ViewAsProvider>
+					<DialogProvider>
+						<HashRouter>
+							<App />
+						</HashRouter>
+					</DialogProvider>
+				</ViewAsProvider>
 			</AuthProvider>
 		</UiModeProvider>
 	</StrictMode>,

@@ -1,0 +1,77 @@
+/* ★ 管理者が、他のアカウントとして閲覧する機能（【SPAで追加した機能】）のスタイル。
+   既存のCSSは、無改変で持つ決まりなので、追加分は、このファイルに分けた（新旧UI・全ページ共通。ページの枠 .ui-page の中だけに効く）。 */
+
+/* ---- ヘッダーの帯（ヘッダーの中。閲覧中だけ） ---- */
+.ui-page #app-header.has-view-as {
+  flex-wrap: wrap;
+}
+/* 帯を足しても、タイトルとボタンの並びは、通常と同じ（タイトルが縮んで、ボタンは、同じ行に残る）。帯だけが、次の行に出る */
+.ui-page #app-header.has-view-as #title-area {
+  flex: 1 1 0;
+  min-width: 0;
+}
+.ui-page #app-header.has-view-as #user-data {
+  flex: 0 0 auto;
+}
+.ui-page #app-header #view-as-banner {
+  flex: 1 0 100%;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.6rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 8px;
+  background-color: #fff3cd;
+  color: #5c4400;
+  font-family: "BIZ UDGothic", sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+  line-height: 1.35;
+}
+.ui-page #app-header #view-as-banner button {
+  flex: 0 0 auto;
+  font-family: "BIZ UDGothic", sans-serif;
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 0.25rem 0.7rem;
+  margin: 0;
+  width: auto;
+  border: none;
+  border-radius: 999px;
+  background-color: #5c4400;
+  color: #fff;
+  cursor: pointer;
+}
+
+/* ---- ドロワーの欄・選択モーダル ---- */
+.ui-page .view-as-note {
+  margin: 0.5rem 0 0;
+  font-size: 0.78rem;
+  line-height: 1.4;
+  color: #667;
+}
+.ui-page #view-as-modal #view-as-search {
+  width: 100%;
+  box-sizing: border-box;
+  margin: 0.5rem 0;
+}
+.ui-page #view-as-modal .view-as-item {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.5rem 0.3rem;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  cursor: pointer;
+}
+.ui-page #view-as-modal .view-as-item:hover {
+  background-color: rgba(0, 0, 0, 0.04);
+}
+.ui-page #view-as-modal .view-as-item-name {
+  font-weight: 700;
+}
+.ui-page #view-as-modal .view-as-item-id {
+  margin-left: auto;
+  font-size: 0.75rem;
+  color: #667;
+}

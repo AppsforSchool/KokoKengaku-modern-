@@ -28,6 +28,9 @@ import { createImageGroupTracker, repositionStatusBadges } from '../lib/statusBa
 import { hasActivePrize, resetUserCache, setUserCache, toMillisOrNull } from '../lib/userCache'
 import { useDialog } from '../ui/DialogProvider'
 import { UiSwitchSection } from '../ui/UiSwitchSection'
+import { ViewAsBanner } from '../features/viewAs/ViewAsBanner'
+import { ViewAsSection } from '../features/viewAs/ViewAsSection'
+import { useViewAs } from '../features/viewAs/ViewAsProvider'
 
 // ★ トーク画面（既存の talk.html + talkScript.js と同じHTML構造・同じ挙動）。
 //   いまは「①表示と既読」「②送信（本文・返信・画像・下書き・通知）」「③アンケート（作成・投票・回答者の一覧・通知）」「④編集・削除・転送・選択」「⑤メンバー管理・グループのアイコン変更」まで。2b（トーク画面）は、これで完了。
@@ -41,7 +44,11 @@ export default function TalkPage({ talkId }: { talkId: string }) {
 	const { userId: authUserId, logout } = useAuth()
 	const dialog = useDialog()
 	const navigate = useNavigate()
+	// 本当のアカウント。送信・投票・編集などの書き込み、権限の判定は、すべて、こちら（他のアカウントとして閲覧中でも、管理者のまま）
 	const myUserId = authUserId || ''
+	// 【SPAで追加】管理者が、他のアカウントとして閲覧中か。閲覧中は、画面の「見え方」（誰のメッセージを右に出すか、どこから未読か）だけ、そのアカウントにする。
+	//   既読（readBy）・最終確認日時（lastChecked）・未読数（unreadCounts）は、書き込まない。
+	const { viewAsUserId, stopViewAs } = useViewAs()
 
 	// ---- 自分 ----
 	const [meIsAdmin, setMeIsAdmin] = useState(false)
@@ -97,6 +104,8 @@ export default function TalkPage({ talkId }: { talkId: string }) {
 		},
 	})
 	const { hideOverlayOnly, talkAreaRef } = room
+	// 実際に、他のアカウントとして閲覧しているか（画面の基準が、自分と違うか）
+	const viewingOther = !!start && start.myUserId !== myUserId
 	useEffect(() => {
 		myNameRef.current = myName
 	}, [myName])
@@ -174,6 +183,33 @@ export default function TalkPage({ talkId }: { talkId: string }) {
 					// プッシュ通知の初期化（読み込みと並行。失敗してもトーク表示には影響させない）
 					startPush(authUserId)
 
+					// 管理者でないのに、閲覧の記録が残っている場合は、消す（通常は、起きない）
+					if (!userData.isAdmin && viewAsUserId) stopViewAs()
+
+					// 【SPAで追加】他のアカウントとして閲覧中なら、そのアカウントの「未読の位置」を基準にする（読み取りだけ。既読は付けない）
+					if (userData.isAdmin && viewAsUserId) {
+						const viewSnapshot = await hedged(() => getDoc(doc(db, 'users_random', viewAsUserId)))
+						const viewData = viewSnapshot.data()
+						if (cancelled) return
+						if (!viewData) {
+							stopViewAs()
+							await dialog.alert('閲覧するアカウントが見つかりませんでした。自分のアカウントに戻ります。')
+							navigate('/', { replace: true })
+							return
+						}
+						setUserCache(viewAsUserId, {
+							name: viewData.name,
+							isAdmin: viewData.isAdmin,
+							imageUrl: viewData.imageUrl || '',
+							profileText: viewData.profileText || '',
+							prizeGrantedAt: viewData.prizeGrantedAt,
+						})
+						const viewerLastChecked: Date | null =
+							viewData.lastChecked && viewData.lastChecked[talkId] ? viewData.lastChecked[talkId].toDate() : null
+						setStart({ myUserId: viewAsUserId, meIsAdmin: !!userData.isAdmin, initialLastChecked: viewerLastChecked, readOnly: true })
+						return
+					}
+
 					setStart({ myUserId: authUserId, meIsAdmin: !!userData.isAdmin, initialLastChecked })
 				} else {
 					hideOverlayOnly()
@@ -188,7 +224,7 @@ export default function TalkPage({ talkId }: { talkId: string }) {
 			cancelled = true
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [authUserId])
+	}, [authUserId, viewAsUserId])
 
 	// ---- 操作 ----
 	const closeDrawer = () => setDrawerOpen(false)
@@ -497,6 +533,7 @@ export default function TalkPage({ talkId }: { talkId: string }) {
 				percent={room.loadingPercent}
 				hidden={room.overlayHidden}
 				watchStall
+				paused={room.imageWaiting}
 				onSkip={room.skipLoading}
 				showSkip={room.showSkip}
 			/>
@@ -593,11 +630,12 @@ export default function TalkPage({ talkId }: { talkId: string }) {
 							ログアウト
 						</button>
 					</div>
+					{meIsAdmin && <ViewAsSection myUserId={myUserId} closeDrawer={closeDrawer} />}
 					<UiSwitchSection />
 				</div>
 			</div>
 
-			<header id="app-header">
+			<header id="app-header" className={viewingOther ? 'has-view-as' : undefined}>
 				<div id="title-area">
 					<p id="header-title">
 						螺鈿紫檀五弦琵琶と<span className="rainbow">不愉快な仲間たち</span>
@@ -612,6 +650,7 @@ export default function TalkPage({ talkId }: { talkId: string }) {
 						アカウント情報
 					</button>
 				</div>
+				<ViewAsBanner actorName={myName} active={viewingOther} />
 			</header>
 
 			<main>

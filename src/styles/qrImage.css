@@ -1,0 +1,50 @@
+/* ★ ログイン画面の「画像から読み取る」ボタン（【SPAで追加した機能】）のスタイル。
+   既存のCSS（new/login.css・old/login.css）は、無改変で持つ決まりなので、追加分は、このファイルに分けた。
+   build/scopeCss.ts の対象（src/styles/(new|old)/<ページ名>.css）ではないため、ここで、新旧UIごとに、範囲（ページ・UI）を直接書く。
+   見た目は、同じモーダルの「もう一度」ボタン（#qr-login-retry）に、合わせてある。 */
+
+/* ---- 新UI ---- */
+html.ui-new .page-login #qr-login-modal #qr-login-image-area {
+  margin-top: 1rem;
+  text-align: center;
+}
+html.ui-new .page-login #qr-login-modal #qr-login-image-button {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-weight: 700;
+  font-size: 0.9rem;
+  background-color: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-full);
+  padding: 0.55rem 1.2rem;
+  cursor: pointer;
+  transition: background-color 0.2s var(--ease), box-shadow 0.2s var(--ease);
+  box-shadow: var(--shadow-sm);
+}
+html.ui-new .page-login #qr-login-modal #qr-login-image-button:hover:not(:disabled) {
+  background-color: var(--primary-dark);
+  box-shadow: var(--shadow-md);
+}
+html.ui-new .page-login #qr-login-modal #qr-login-image-button:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+/* ---- 旧UI ---- */
+html.ui-old .page-login #qr-login-modal #qr-login-image-area {
+  margin-top: 0.5rem;
+  text-align: center;
+}
+html.ui-old .page-login #qr-login-modal #qr-login-image-button {
+  font-family: "BIZ UDGothic", sans-serif;
+  font-weight: 700;
+  font-size: 0.9rem;
+  background-color: var(--primary);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.3rem 0.6rem;
+}
+html.ui-old .page-login #qr-login-modal #qr-login-image-button:disabled {
+  opacity: 0.6;
+}

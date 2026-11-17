@@ -1,15 +1,23 @@
 import { Route, Routes, useParams } from 'react-router-dom'
 import { RequireAuth } from './auth/RequireAuth'
+import { useViewAs } from './features/viewAs/ViewAsProvider'
 import { PerfRouteWatcher } from './components/PerfRouteWatcher'
 import LoginPage from './pages/LoginPage'
 import RoomListPage from './pages/RoomListPage'
 import TalkPage from './pages/TalkPage'
 import NotFoundPage from './pages/NotFoundPage'
 
-// ルームごとに別の画面として扱う（ルームIDが変わったら、状態を作り直す）
+// ルームごとに別の画面として扱う（ルームIDが変わったら、状態を作り直す）。
+// 管理者が、他のアカウントとして閲覧している場合は、閲覧するアカウントが変わったときも、作り直す（前の人の一覧・未読数を、残さないため）。
 function TalkRoute() {
 	const { roomId } = useParams()
-	return <TalkPage key={roomId} talkId={roomId || ''} />
+	const { viewAsUserId } = useViewAs()
+	return <TalkPage key={`${roomId}|${viewAsUserId ?? ''}`} talkId={roomId || ''} />
+}
+
+function RoomListRoute() {
+	const { viewAsUserId } = useViewAs()
+	return <RoomListPage key={viewAsUserId ?? 'self'} />
 }
 
 // ★ ルート（仕様書 §6.1）。旧URLとの対応：
@@ -25,7 +33,7 @@ export default function App() {
 					path="/"
 					element={
 						<RequireAuth page="app">
-							<RoomListPage />
+							<RoomListRoute />
 						</RequireAuth>
 					}
 				/>

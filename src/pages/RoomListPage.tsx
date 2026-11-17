@@ -17,6 +17,9 @@ import { createImageGroupTracker } from '../lib/statusBadge'
 import { getUserCache, hasActivePrize, resetUserCache, setUserCache, toMillisOrNull, type UserCacheEntry } from '../lib/userCache'
 import { useDialog } from '../ui/DialogProvider'
 import { UiSwitchSection } from '../ui/UiSwitchSection'
+import { ViewAsBanner } from '../features/viewAs/ViewAsBanner'
+import { ViewAsSection } from '../features/viewAs/ViewAsSection'
+import { useViewAs } from '../features/viewAs/ViewAsProvider'
 
 // ★ ルーム一覧の画面（既存の app.html + appScript.js と同じHTML構造・同じ挙動）。
 //   ・個人タブ：全ユーザーを並べる。自分（メモ）→ トークしたことのある相手（新しい順）→ まだの相手。
@@ -59,7 +62,9 @@ export default function RoomListPage() {
 	const { userId: authUserId, logout } = useAuth()
 	const dialog = useDialog()
 	const navigate = useNavigate()
-	const myUserId = authUserId || ''
+	const myUserId = authUserId || '' // 本当のアカウント（書き込み・ドロワーの表示は、こちら）
+	// 【SPAで追加】管理者が、他のアカウントとして閲覧中か。閲覧中は、一覧の「見え方」だけ、そのアカウントにする（書き込みは、しない）
+	const { viewAsUserId, stopViewAs } = useViewAs()
 
 	// ---- 読み込み画面 ----
 	const [loadingText, setLoadingText] = useState('システムの読み込みに時間がかかる場合があります｡')
@@ -108,6 +113,9 @@ export default function RoomListPage() {
 			/* 保存できなくても問題なし */
 		}
 	}, [tab])
+
+	// 実際に、他のアカウントとして閲覧しているか（一覧の基準が、自分と違うか）
+	const viewingOther = !!start && start.myUserId !== myUserId
 
 	// ---- 一覧のデータ ----
 	const hideOverlayAndShowList = useCallback(() => {
@@ -169,6 +177,30 @@ export default function RoomListPage() {
 					// プッシュ通知の初期化（失敗してもトーク一覧の表示には影響させない）
 					startPush(authUserId)
 
+					// 管理者でないのに、閲覧の記録が残っている場合は、消す（通常は、起きない）
+					if (!userData.isAdmin && viewAsUserId) stopViewAs()
+
+					// 【SPAで追加】管理者が、他のアカウントとして閲覧中なら、そのアカウントの一覧を出す（読み取りだけ）
+					if (userData.isAdmin && viewAsUserId) {
+						const viewSnapshot = await hedged(() => getDoc(doc(db, 'users_random', viewAsUserId)))
+						const viewData = viewSnapshot.data()
+						if (cancelled) return
+						if (!viewData) {
+							stopViewAs()
+							await dialog.alert('閲覧するアカウントが見つかりませんでした。自分のアカウントに戻ります。')
+							return
+						}
+						setUserCache(viewAsUserId, {
+							name: viewData.name,
+							isAdmin: viewData.isAdmin,
+							imageUrl: viewData.imageUrl || '',
+							profileText: viewData.profileText || '',
+							prizeGrantedAt: viewData.prizeGrantedAt,
+						})
+						setStart({ myUserId: viewAsUserId, meIsAdmin: !!viewData.isAdmin })
+						return
+					}
+
 					setStart({ myUserId: authUserId, meIsAdmin: !!userData.isAdmin })
 				} else {
 					setOverlayHidden(true)
@@ -183,11 +215,12 @@ export default function RoomListPage() {
 			cancelled = true
 		}
 		// eslint-disable-next-line react-hooks/exhaustive-deps
-	}, [authUserId])
+	}, [authUserId, viewAsUserId])
 
 	// ---- 個人タブの並び（既存の renderPersonalList。変化があったときだけ作り直す） ----
 	const personalItems = useMemo<PersonalItem[]>(() => {
 		if (!start || personalVersion === 0) return [] // 最初のデータが届くまでは、何も並べない
+		const viewerUserId = start.myUserId // 他のアカウントとして閲覧中は、そのアカウント（それ以外は、自分）
 		const getName = (id: string) => (getUserCache(id) || {}).name || id
 		const roomByPartner = pickRoomByPartner(rooms)
 
@@ -197,8 +230,8 @@ export default function RoomListPage() {
 		Object.keys(roomByPartner).forEach((partnerId) => {
 			if (!knownIds.has(partnerId)) people.push({ userId: partnerId, name: getName(partnerId) })
 		})
-		if (!knownIds.has(myUserId) && !people.some((u) => u.userId === myUserId)) {
-			people.unshift({ userId: myUserId, name: getName(myUserId) })
+		if (!knownIds.has(viewerUserId) && !people.some((u) => u.userId === viewerUserId)) {
+			people.unshift({ userId: viewerUserId, name: getName(viewerUserId) })
 		}
 
 		const buttonOf = (u: { userId: string; name: string }, roomId: string | null, isSelf: boolean): PersonalItem => {
@@ -216,12 +249,12 @@ export default function RoomListPage() {
 
 		const items: PersonalItem[] = []
 		// 1) 自分だけのトーク
-		const me = people.find((u) => u.userId === myUserId)
-		if (me) items.push(buttonOf(me, roomByPartner[myUserId] ? roomByPartner[myUserId].roomId : null, true))
+		const me = people.find((u) => u.userId === viewerUserId)
+		if (me) items.push(buttonOf(me, roomByPartner[viewerUserId] ? roomByPartner[viewerUserId].roomId : null, true))
 
 		// 2) トークしたことのある相手（更新が新しい順、「今日」「昨日」の見出し付き）
 		const withRoom = people
-			.filter((u) => u.userId !== myUserId && roomByPartner[u.userId])
+			.filter((u) => u.userId !== viewerUserId && roomByPartner[u.userId])
 			.sort((a, b) => roomByPartner[b.userId].lastUpdatedAtMs - roomByPartner[a.userId].lastUpdatedAtMs)
 		let currentLabel: string | null = null
 		withRoom.forEach((u) => {
@@ -235,7 +268,7 @@ export default function RoomListPage() {
 		})
 
 		// 3) まだトークしていない相手
-		const withoutRoom = people.filter((u) => u.userId !== myUserId && !roomByPartner[u.userId])
+		const withoutRoom = people.filter((u) => u.userId !== viewerUserId && !roomByPartner[u.userId])
 		if (withoutRoom.length > 0) {
 			items.push({ kind: 'header', key: 'h-none', label: 'まだトークしていない人' })
 			withoutRoom.forEach((u) => items.push(buttonOf(u, null, false)))
@@ -288,6 +321,11 @@ export default function RoomListPage() {
 	// まだトークしていない相手を押したとき：確認してから新しい個人トークを作る
 	const startPersonalTalk = async (targetUserId: string, isSelf: boolean) => {
 		if (isCreatingPersonalTalk.current) return
+		if (viewingOther) {
+			// 【SPAで追加】他のアカウントとして閲覧中は、そのアカウントのトークを、新しく作らない
+			await dialog.alert('他のアカウントとして閲覧中は、新しいトークを始められません。')
+			return
+		}
 		const displayName = (getUserCache(targetUserId) || {}).name || targetUserId
 		const message = isSelf ? '自分だけのトークを開始しますか？' : `"${displayName}"とのトークを開始しますか？`
 		const ok = await dialog.confirm(message, { okText: '開始する' })
@@ -402,11 +440,12 @@ export default function RoomListPage() {
 							ログアウト
 						</button>
 					</div>
+					{meIsAdmin && <ViewAsSection myUserId={myUserId} closeDrawer={closeDrawer} />}
 					<UiSwitchSection />
 				</div>
 			</div>
 
-			<header id="app-header">
+			<header id="app-header" className={viewingOther ? 'has-view-as' : undefined}>
 				<div id="title-area">
 					<p id="header-title">
 						螺鈿紫檀五弦琵琶と<span className="rainbow">不愉快な仲間たち</span>
@@ -421,6 +460,7 @@ export default function RoomListPage() {
 						アカウント情報
 					</button>
 				</div>
+				<ViewAsBanner actorName={myName} active={viewingOther} />
 			</header>
 
 			<main>
@@ -482,7 +522,7 @@ export default function RoomListPage() {
 					<div id="group-area" className={'talk-list-area' + (tab === 'group' ? '' : ' hidden')}>
 						<button
 							id="open-create-talk-modal-button"
-							className={'normal-button' + (meIsAdmin ? '' : ' hidden')}
+							className={'normal-button' + (meIsAdmin && !viewingOther ? '' : ' hidden')}
 							onClick={() => setCreateOpen(true)}
 						>
 							＋ 新しいグループを作成
