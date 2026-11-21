@@ -1,6 +1,7 @@
 import { useMemo } from 'react'
 import { Avatar } from '../../components/Avatar'
 import { hasActivePrize } from '../../lib/userCache'
+import { answerIncludes } from './pollAnswer'
 import { useUserEntries, type UserEntry } from './useUserEntries'
 
 // ★ ある選択肢を選んだ人の一覧（既存の openPollVotersModal と同じ）。
@@ -24,7 +25,7 @@ export function PollVotersModal({ target, onClose, onOpenProfile }: Props) {
 		() =>
 			target
 				? {
-						userIds: Object.keys(target.answerMap || {}).filter((uid) => target.answerMap[uid] === target.choiceIndex),
+						userIds: Object.keys(target.answerMap || {}).filter((uid) => answerIncludes(target.answerMap[uid], target.choiceIndex)),
 						token: target.token,
 					}
 				: null,

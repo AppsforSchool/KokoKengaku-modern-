@@ -279,16 +279,16 @@ export default function TalkPage({ talkId }: { talkId: string }) {
 		})
 
 	/** アンケートを送る（失敗したら例外。呼び出し側のモーダルが、ダイアログで知らせる）。 */
-	const handleSendPoll = async (question: string, choices: string[]) => {
-		await sendPollMessage({ talkId, myUserId, question, choices, replyTo: replyToIdRef.current })
+	const handleSendPoll = async (question: string, choices: string[], multiple: boolean) => {
+		await sendPollMessage({ talkId, myUserId, question, choices, multiple, replyTo: replyToIdRef.current })
 		void notifyThisRoom('📊 ' + question, replyToIdRef.current) // 新着通知（待たない）
 		cancelReply() // 送信成功後は返信状態を解除
 	}
 
 	/** アンケートに回答（または回答を変更）する。全メンバーへの通知は待たない。 */
 	const handleVotePoll = useCallback(
-		async (messageId: string, selectedIndex: number, hadMyAnswer: boolean) => {
-			await votePoll({ talkId, myUserId, messageId, selectedIndex })
+		async (messageId: string, selectedIndices: number[], multiple: boolean, hadMyAnswer: boolean) => {
+			await votePoll({ talkId, myUserId, messageId, selectedIndices, multiple })
 			void notifyPollAnswer({
 				talkId,
 				myUserId,

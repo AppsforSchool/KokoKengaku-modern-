@@ -17,7 +17,7 @@ interface Props {
 	onStartReply: (docId: string, senderName: string) => void
 	onJump: (targetId: string) => void
 	myUserId: string
-	onVotePoll: (messageId: string, selectedIndex: number, hadMyAnswer: boolean) => Promise<void>
+	onVotePoll: (messageId: string, selectedIndices: number[], multiple: boolean, hadMyAnswer: boolean) => Promise<void>
 	onOpenPollVoters: (answerMap: Record<string, unknown>, choiceIndex: number, choiceLabel: string) => void
 	meIsAdmin: boolean
 	/** 一括選択で、このメッセージが選ばれているか。 */
@@ -169,8 +169,9 @@ function MessageItemBase({ view, showUnreadDivider, onOpenProfile, onOpenReadBy,
 								messageId={view.id}
 								choices={view.data.choices}
 								answerMap={(view.data.answer as Record<string, unknown>) || {}}
+								multiple={view.data.multiple === true}
 								myUserId={myUserId}
-								onVote={onVotePoll}
+								onVote={(messageId, selectedIndices, hadMyAnswer) => onVotePoll(messageId, selectedIndices, view.data.multiple === true, hadMyAnswer)}
 								onOpenVoters={onOpenPollVoters}
 							/>
 						)}

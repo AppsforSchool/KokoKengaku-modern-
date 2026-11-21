@@ -5,6 +5,7 @@ import { useDialog } from '../../ui/DialogProvider'
 //   ・開くたびに、質問欄を空に、選択肢を2行に戻す。選択肢は、最小2・最大10。最小のあいだは、削除ボタン「×」を隠す。
 //   ・質問が入力され、選択肢が2つ以上埋まっていれば、送信できる。
 //   ・空の選択肢は、送るときに取り除く（最大10個まで）。
+//   ・【SPAで追加】回答方法を選べる：単一選択（既存と同じ。既定）／複数選択（いくつでも選べる）。開くたびに、単一選択に戻す。
 
 export const POLL_MIN_CHOICES = 2
 export const POLL_MAX_CHOICES = 10
@@ -13,7 +14,7 @@ interface Props {
 	open: boolean
 	onClose: () => void
 	/** アンケートを送る。失敗したら例外を投げる（成功したら、返信状態の解除もここで行う）。 */
-	onSubmit: (question: string, choices: string[]) => Promise<void>
+	onSubmit: (question: string, choices: string[], multiple: boolean) => Promise<void>
 }
 
 interface Row {
@@ -27,10 +28,12 @@ export function PollCreateModal({ open, onClose, onSubmit }: Props) {
 	const makeRows = (): Row[] => Array.from({ length: POLL_MIN_CHOICES }, () => ({ id: nextId.current++, value: '' }))
 	const [question, setQuestion] = useState('')
 	const [rows, setRows] = useState<Row[]>(() => makeRows())
+	const [multiple, setMultiple] = useState(false) // 複数選択か（既定は、単一選択）
 	const [submitting, setSubmitting] = useState(false)
 
 	const reset = () => {
 		setQuestion('')
+		setMultiple(false)
 		setRows(makeRows())
 	}
 
@@ -54,7 +57,7 @@ export function PollCreateModal({ open, onClose, onSubmit }: Props) {
 
 		setSubmitting(true)
 		try {
-			await onSubmit(trimmedQuestion, choices)
+			await onSubmit(trimmedQuestion, choices, multiple)
 			onClose()
 			reset()
 		} catch (error) {
@@ -82,6 +85,20 @@ export function PollCreateModal({ open, onClose, onSubmit }: Props) {
 						value={question}
 						onChange={(e) => setQuestion(e.target.value)}
 					></textarea>
+
+					<p className="profile-label" style={{ marginTop: '1rem' }}>
+						回答方法
+					</p>
+					<div id="poll-mode-group">
+						<label className="poll-choice-option">
+							<input type="radio" name="poll-mode" id="poll-mode-single" checked={!multiple} onChange={() => setMultiple(false)} />
+							<span className="poll-choice-label">単一選択（1つだけ選べる）</span>
+						</label>
+						<label className="poll-choice-option">
+							<input type="radio" name="poll-mode" id="poll-mode-multiple" checked={multiple} onChange={() => setMultiple(true)} />
+							<span className="poll-choice-label">複数選択（いくつでも選べる）</span>
+						</label>
+					</div>
 
 					<p className="profile-label" style={{ marginTop: '1rem' }}>
 						選択肢（最大10個）

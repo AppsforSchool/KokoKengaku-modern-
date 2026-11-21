@@ -1,31 +1,35 @@
 import { useState } from 'react'
 import { useDialog } from '../../ui/DialogProvider'
+import { answerIncludes, sameIndices, toIndices } from './pollAnswer'
 
 // ★ メッセージ内に表示するアンケート（既存の buildPollWidget と同じHTML構造・同じ挙動）。
-//   ・自分の回答がある選択肢に、最初からチェックが入る。自分の回答と違う選択肢を選ぶと、「答える」（回答済みなら「再回答する」）が押せる。
+//   ・自分の回答がある選択肢に、最初からチェックが入る。自分の回答と違う選択をすると、「答える」（回答済みなら「再回答する」）が押せる。
 //   ・「〇人」をタップすると、その選択肢を選んだ人の一覧。
 //   ・既存は、メッセージが変更されるたびに作り直され、選択が自分の回答に戻っていた。同じにするため、呼び出し側が、変更のたびに key を変える。
+//   ・【SPAで追加】複数選択（multiple）：ラジオボタンではなく、四角い選択（チェックボックス）。いくつでも選べる。1つも選んでいないときは、答えられない。
 
 interface Props {
 	messageId: string
 	choices: string[]
 	answerMap: Record<string, unknown>
+	/** 複数選択のアンケートか。 */
+	multiple: boolean
 	myUserId: string
-	/** 回答を送る。失敗したら例外を投げる。 */
-	onVote: (messageId: string, selectedIndex: number, hadMyAnswer: boolean) => Promise<void>
+	/** 回答（選んだ番号。単一選択は、1つ）を送る。失敗したら例外を投げる。 */
+	onVote: (messageId: string, selectedIndices: number[], hadMyAnswer: boolean) => Promise<void>
 	onOpenVoters: (answerMap: Record<string, unknown>, choiceIndex: number, choiceLabel: string) => void
 }
 
-export function PollWidget({ messageId, choices, answerMap, myUserId, onVote, onOpenVoters }: Props) {
+export function PollWidget({ messageId, choices, answerMap, multiple, myUserId, onVote, onOpenVoters }: Props) {
 	const dialog = useDialog()
 	const hasMyAnswer = Object.prototype.hasOwnProperty.call(answerMap, myUserId)
-	const myAnswerIndex = hasMyAnswer ? (answerMap[myUserId] as number) : null
-	const [selected, setSelected] = useState<number | null>(myAnswerIndex)
+	const myIndices = hasMyAnswer ? toIndices(answerMap[myUserId]) : []
+	const [selected, setSelected] = useState<number[]>(myIndices)
 	const [sending, setSending] = useState(false)
-	const radioGroupName = `poll-${messageId}`
+	const groupName = `poll-${messageId}`
 
 	const handleAnswer = async () => {
-		if (selected === null) return
+		if (selected.length === 0) return
 		setSending(true)
 		try {
 			await onVote(messageId, selected, hasMyAnswer)
@@ -41,16 +45,32 @@ export function PollWidget({ messageId, choices, answerMap, myUserId, onVote, on
 		<div className="poll-widget">
 			<div className="poll-choices-scroll">
 				{choices.map((choiceLabel, index) => {
-					const count = Object.values(answerMap).filter((v) => v === index).length
+					const count = Object.values(answerMap).filter((v) => answerIncludes(v, index)).length
 					return (
 						<label key={index} className="poll-choice-option">
-							<input
-								type="radio"
-								name={radioGroupName}
-								value={String(index)}
-								checked={selected === index}
-								onChange={() => setSelected(index)}
-							/>
+							{multiple ? (
+								<input
+									type="checkbox"
+									name={groupName}
+									value={String(index)}
+									checked={selected.includes(index)}
+									onChange={(e) => {
+										const isChecked = e.target.checked
+										setSelected((current) => {
+											const next = isChecked ? [...current.filter((n) => n !== index), index] : current.filter((n) => n !== index)
+											return next.sort((a, b) => a - b)
+										})
+									}}
+								/>
+							) : (
+								<input
+									type="radio"
+									name={groupName}
+									value={String(index)}
+									checked={selected.includes(index)}
+									onChange={() => setSelected([index])}
+								/>
+							)}
 							<span className="poll-choice-label">{choiceLabel}</span>
 							<span
 								className="poll-choice-count"
@@ -67,7 +87,7 @@ export function PollWidget({ messageId, choices, answerMap, myUserId, onVote, on
 			<button
 				type="button"
 				className="poll-answer-button"
-				disabled={sending || selected === myAnswerIndex}
+				disabled={sending || selected.length === 0 || sameIndices(selected, myIndices)}
 				onClick={() => void handleAnswer()}
 			>
 				{sending ? '送信中...' : hasMyAnswer ? '再回答する' : '答える'}

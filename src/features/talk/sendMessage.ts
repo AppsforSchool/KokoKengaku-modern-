@@ -89,12 +89,15 @@ export async function sendPollMessage(p: {
 	myUserId: string
 	question: string
 	choices: string[]
+	/** 複数選択のアンケートか（【SPAで追加】）。単一選択のときは、この項目を、書き込まない（既存と同じ形）。 */
+	multiple?: boolean
 	replyTo: string | null
 }): Promise<void> {
 	await addDoc(collection(db, 'KokoKengaku', p.talkId, 'talk'), {
 		userId: p.myUserId,
 		message: p.question,
 		choices: p.choices,
+		...(p.multiple ? { multiple: true } : {}),
 		answer: {},
 		readBy: [],
 		replyTo: p.replyTo || null,
@@ -105,10 +108,20 @@ export async function sendPollMessage(p: {
 	})
 }
 
-/** アンケートに回答（または回答を変更）する。自分の分（answer.{ユーザーID}）だけを書き込む。 */
-export async function votePoll(p: { talkId: string; myUserId: string; messageId: string; selectedIndex: number }): Promise<void> {
+/**
+ * アンケートに回答（または回答を変更）する。自分の分（answer.{ユーザーID}）だけを書き込む。
+ * 単一選択は、選んだ番号（数字。既存と同じ形）。複数選択は、選んだ番号の配列（小さい順）。
+ */
+export async function votePoll(p: {
+	talkId: string
+	myUserId: string
+	messageId: string
+	selectedIndices: number[]
+	multiple: boolean
+}): Promise<void> {
+	const sorted = [...p.selectedIndices].sort((a, b) => a - b)
 	await updateDoc(doc(db, 'KokoKengaku', p.talkId, 'talk', p.messageId), {
-		[`answer.${p.myUserId}`]: p.selectedIndex,
+		[`answer.${p.myUserId}`]: p.multiple ? sorted : sorted[0],
 	})
 }
 

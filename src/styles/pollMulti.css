@@ -1,0 +1,26 @@
+/* ★ アンケートの「複数選択」（【SPAで追加した機能】）のスタイル。
+   既存のCSS（new/talk.css・old/talk.css）は、無改変で持つ決まりなので、追加分は、このファイルに分けた（新旧UI共通。ページの枠 .ui-page の中だけに効く）。
+   ・複数選択は、ラジオボタン（丸）ではなく、四角い選択（チェックマークなし）。選ぶと、四角が塗りつぶされる。
+   ・作成画面の「回答方法」の並びの間隔。 */
+.ui-page .poll-choice-option input[type="checkbox"] {
+  appearance: none;
+  -webkit-appearance: none;
+  box-sizing: border-box;
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+  margin: 0;
+  border: 2px solid var(--primary, #0077b6);
+  border-radius: 3px;
+  background-color: transparent;
+  cursor: pointer;
+}
+.ui-page .poll-choice-option input[type="checkbox"]:checked {
+  background-color: var(--primary, #0077b6);
+}
+
+.ui-page #poll-mode-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}

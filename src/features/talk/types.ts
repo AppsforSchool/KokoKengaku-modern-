@@ -43,6 +43,8 @@ export interface MessageData {
 	replyTo?: string
 	imageUrl?: string
 	choices?: string[]
+	/** 複数選択のアンケートのとき true（単一選択には、この項目は、付かない）。 */
+	multiple?: boolean
 	answer?: Record<string, unknown>
 	isDisplay?: boolean
 	[key: string]: unknown
