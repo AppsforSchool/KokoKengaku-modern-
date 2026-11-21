@@ -5,7 +5,7 @@ import { useDialog } from '../../ui/DialogProvider'
 //   ・開くたびに、質問欄を空に、選択肢を2行に戻す。選択肢は、最小2・最大10。最小のあいだは、削除ボタン「×」を隠す。
 //   ・質問が入力され、選択肢が2つ以上埋まっていれば、送信できる。
 //   ・空の選択肢は、送るときに取り除く（最大10個まで）。
-//   ・【SPAで追加】回答方法を選べる：単一選択（既存と同じ。既定）／複数選択（いくつでも選べる）。開くたびに、単一選択に戻す。
+//   ・【SPAで追加】回答方法を選べる：単一選択（既存と同じ。既定）／複数選択。開くたびに、単一選択に戻す。
 
 export const POLL_MIN_CHOICES = 2
 export const POLL_MAX_CHOICES = 10
@@ -92,16 +92,16 @@ export function PollCreateModal({ open, onClose, onSubmit }: Props) {
 					<div id="poll-mode-group">
 						<label className="poll-choice-option">
 							<input type="radio" name="poll-mode" id="poll-mode-single" checked={!multiple} onChange={() => setMultiple(false)} />
-							<span className="poll-choice-label">単一選択（1つだけ選べる）</span>
+							<span className="poll-choice-label">単一選択</span>
 						</label>
 						<label className="poll-choice-option">
 							<input type="radio" name="poll-mode" id="poll-mode-multiple" checked={multiple} onChange={() => setMultiple(true)} />
-							<span className="poll-choice-label">複数選択（いくつでも選べる）</span>
+							<span className="poll-choice-label">複数選択</span>
 						</label>
 					</div>
 
 					<p className="profile-label" style={{ marginTop: '1rem' }}>
-						選択肢（最大10個）
+						選択肢
 					</p>
 					<div id="poll-choices-list">
 						{rows.map((row, index) => (
